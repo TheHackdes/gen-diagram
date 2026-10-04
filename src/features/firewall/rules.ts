@@ -27,7 +27,7 @@ export const RULE_PRESETS: { label: string; rule: Partial<FirewallRule> }[] = [
   { label: 'RDP', rule: { protocol: 'tcp', ports: '3389', comment: 'Remote desktop' } },
   { label: 'DNS', rule: { protocol: 'tcp/udp', ports: '53', comment: 'DNS' } },
   { label: 'Ping', rule: { protocol: 'icmp', comment: 'ICMP echo' } },
-  { label: 'Deny all', rule: { action: 'deny', protocol: 'any', comment: 'Default deny' } },
+  { label: 'Deny all', rule: { action: 'deny', protocol: 'any', source: 'any', destination: 'any', comment: 'Default deny' } },
 ];
 
 const ACTIONS = new Set(['allow', 'deny']);
@@ -99,4 +99,44 @@ export function addressProblem(value: string): string | null {
 export function formatPorts(rule: FirewallRule): string {
   if (rule.protocol === 'icmp' || rule.protocol === 'any') return '—';
   return rule.ports.trim() || 'all';
+}
+
+/** Ports commonly used in rules (shown as suggestions). */
+export const COMMON_PORTS: { value: string; label: string }[] = [
+  { value: '22', label: 'SSH' },
+  { value: '80,443', label: 'HTTP / HTTPS' },
+  { value: '443', label: 'HTTPS' },
+  { value: '53', label: 'DNS' },
+  { value: '3389', label: 'RDP' },
+  { value: '25,465,587', label: 'SMTP' },
+  { value: '389,636', label: 'LDAP / LDAPS' },
+  { value: '445', label: 'SMB' },
+  { value: '2049', label: 'NFS' },
+  { value: '3306', label: 'MySQL / MariaDB' },
+  { value: '5432', label: 'PostgreSQL' },
+  { value: '51820', label: 'WireGuard' },
+  { value: '500,4500', label: 'IPsec' },
+  { value: '161', label: 'SNMP' },
+  { value: '8006', label: 'Proxmox UI' },
+];
+
+const DIRECTION_LABEL: Record<string, string> = { in: 'In', out: 'Out', forward: 'Fwd' };
+
+/** One-line reading of a rule: "Allow TCP 443 · any → 10.0.0.5". */
+export function describeRule(r: FirewallRule): { head: string; flow: string } {
+  const proto = r.protocol === 'any' ? 'any protocol' : r.protocol.toUpperCase();
+  const ports = r.protocol === 'icmp' || r.protocol === 'any' ? '' : ` ${r.ports.trim() || 'all ports'}`;
+  return {
+    head: `${r.action === 'allow' ? 'Allow' : 'Deny'} ${proto}${ports}`,
+    flow: `${DIRECTION_LABEL[r.direction]} · ${r.source || '?'} → ${r.destination || '?'}`,
+  };
+}
+
+const isCatchAllDeny = (r: FirewallRule | undefined) =>
+  !!r && r.action === 'deny' && r.source.trim() === 'any' && r.destination.trim() === 'any' && r.protocol === 'any';
+
+/** Add a rule; a final "deny everything" stays last so the new rule is reachable. */
+export function insertRule(rules: FirewallRule[], rule: FirewallRule): FirewallRule[] {
+  const last = rules[rules.length - 1];
+  return isCatchAllDeny(last) && !isCatchAllDeny(rule) ? [...rules.slice(0, -1), rule, last!] : [...rules, rule];
 }

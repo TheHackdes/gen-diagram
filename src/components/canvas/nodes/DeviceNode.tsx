@@ -20,7 +20,7 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
   const isDocker = def.role === 'docker-container';
   const isLxc = def.role === 'lxc';
 
-  if (compact) return <CompactRow id={id} data={data} selected={selected} />;
+  if (compact) return <CompactRow id={id} data={data} selected={selected} parentId={parentId} />;
 
   if (isDocker) {
     const image = str(data.props.image);

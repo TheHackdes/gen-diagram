@@ -58,3 +58,12 @@ describe('firewall rule tables', () => {
     expect(dockTables([a, b, free]).find((n) => n.id === 't')!.position).toEqual({ x: 0, y: 0 });
   });
 });
+
+describe('compact line fields', () => {
+  it('defaults, custom choice and unknown keys', async () => {
+    const { compactFieldsOf, DEFAULT_COMPACT_FIELDS } = await import('../nodes/compact');
+    expect(compactFieldsOf(node('proxmox', 'h1', { compact: true }))).toEqual(DEFAULT_COMPACT_FIELDS);
+    expect(compactFieldsOf(node('proxmox', 'h2', { compactFields: ['ip', 'bogus', 'hostname'] }))).toEqual(['ip', 'hostname']);
+    expect(compactFieldsOf(node('proxmox', 'h3', { compactFields: [] }))).toEqual([]);
+  });
+});

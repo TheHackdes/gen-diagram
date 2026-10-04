@@ -40,7 +40,7 @@ export function useKeyboardShortcuts(): void {
       const ui = useUi.getState();
       const st = useDiagram.getState();
       if (ui.view !== 'workspace') return;
-      if (ui.dialog || ui.confirm || ui.prompt) return;
+      if (ui.dialog || ui.confirm || ui.prompt || ui.rulesFor) return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
 

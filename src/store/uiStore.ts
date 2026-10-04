@@ -51,6 +51,9 @@ interface UiState {
   toasts: Toast[];
   contextMenu: ContextMenuState | null;
   zoom: number;
+  /** Node whose firewall rules are open in the wide editor. */
+  rulesFor: string | null;
+  openRules: (nodeId: string | null) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
   setView: (v: View) => void;
@@ -89,6 +92,8 @@ export const useUi = create<UiState>((set, get) => ({
   toasts: [],
   contextMenu: null,
   zoom: 1,
+  rulesFor: null,
+  openRules: (rulesFor) => set({ rulesFor }),
   setTheme: (theme) => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     try {

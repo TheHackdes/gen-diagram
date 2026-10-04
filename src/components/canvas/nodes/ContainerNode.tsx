@@ -8,7 +8,7 @@ import { alpha, str } from '../../../utils/misc';
 import { cn } from '../../ui/cn';
 import { COMPACT_HEADER, extraIps, headerHeight, shownExtraIps } from '../../../features/nodes/ips';
 import { Icon } from '../../icons/Icon';
-import { useInCompactHost } from './CompactRow';
+import { useCompactFields, useInCompactHost } from './CompactRow';
 import { CapabilityBadges, DetailLines, EditableName, ExtraIpLines, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChip } from './shared';
 
 const RUNS_ON: Record<string, string> = { vm: 'VM', physical: 'Bare metal', lxc: 'LXC' };
@@ -16,6 +16,7 @@ const RUNS_ON: Record<string, string> = { vm: 'VM', physical: 'Bare metal', lxc:
 /** Hypervisors and Docker hosts: a header card with a body hosting guests. */
 function ContainerNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) {
   const inCompact = useInCompactHost(parentId);
+  const show = useCompactFields(parentId);
   const setCompact = useDiagram((s) => s.setCompact);
   const def = getDefinition(data.type);
   const color = data.color ?? colorOf(def);
@@ -43,15 +44,16 @@ function ContainerNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode
             <Icon name={def.icon} size={13} brandColor={def.icon.startsWith('brand:')} />
           </span>
           <EditableName id={id} value={data.name} className="max-w-[38%] min-w-0 truncate text-[12px] font-semibold text-fg" />
-          {isDocker && str(data.props.runsOn) && (
+          {show.has('type') && isDocker && str(data.props.runsOn) && (
             <span className="shrink-0 rounded px-1 text-[9px] font-bold" style={{ background: alpha(color, 0.14), color }}>
               {RUNS_ON[str(data.props.runsOn)] ?? ''}
             </span>
           )}
-          {ip && <span className="shrink-0 font-mono text-[10.5px] text-muted">{ip}</span>}
+          {show.has('ip') && ip && <span className="shrink-0 font-mono text-[10.5px] text-muted">{ip}</span>}
           <span className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
-            <OsChip osId={data.props.os} version={data.props.osVersion} />
-            <VlanChip vlan={vlan} raw={str(data.props.vlan)} />
+            {show.has('os') && <OsChip osId={data.props.os} version={data.props.osVersion} />}
+            {show.has('vlan') && <VlanChip vlan={vlan} raw={str(data.props.vlan)} />}
+            {show.has('services') && <CapabilityBadges props={data.props} max={2} />}
             <span className="shrink-0 text-[10px] font-medium text-muted">{countLabel}</span>
           </span>
         </div>

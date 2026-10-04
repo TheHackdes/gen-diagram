@@ -14,9 +14,10 @@ import { FieldRow, Input, Switch } from '../ui/Field';
 import { analyzeBond } from '../../features/connections/bonds';
 import { hasRules } from '../../features/firewall/rules';
 import { DEFAULT_DISPLAY, DETAIL_OPTIONS, displayedKeys } from '../../features/nodes/details';
+import { COMPACT_FIELDS, compactFieldsOf, DEFAULT_COMPACT_FIELDS, type CompactField } from '../../features/nodes/compact';
 import { inCompactHost } from '../../features/nodes/ips';
 import { FieldEditor } from './FieldEditor';
-import { FirewallRulesSection } from './FirewallRulesSection';
+import { FirewallRulesSection } from './rules/FirewallRulesSection';
 import { ServicesSection } from './ServicesSection';
 
 const ACCENTS = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2', '#db2777', '#475569'];
@@ -186,17 +187,57 @@ function CapabilitySection({ node, capability }: { node: InfraNode; capability: 
 
 function CompactSection({ node }: { node: InfraNode }) {
   const setCompact = useDiagram((s) => s.setCompact);
+  const update = useDiagram((s) => s.updateNodeProps);
   const nested = useDiagram((s) => {
     const byId = new Map(s.nodes.map((n) => [n.id, n]));
     return inCompactHost(node, byId);
   });
   if (nested) return null;
+  const on = node.data.props.compact === true;
+  const fields = compactFieldsOf(node);
+  const toggle = (key: CompactField) => update(node.id, { compactFields: fields.includes(key) ? fields.filter((k) => k !== key) : [...fields, key] });
+  const isDefault = fields.length === DEFAULT_COMPACT_FIELDS.length && DEFAULT_COMPACT_FIELDS.every((k) => fields.includes(k));
   return (
     <Section title="Display">
-      <Switch id={`compact-${node.id}`} label="Compact view" checked={node.data.props.compact === true} onChange={(v) => setCompact(node.id, v)} />
+      <Switch id={`compact-${node.id}`} label="Compact view" checked={on} onChange={(v) => setCompact(node.id, v)} />
       <p className="mt-1.5 text-[11.5px] leading-snug text-subtle">
-        One line per {getDefinition(node.data.type).role === 'docker-host' ? 'container' : 'VM, LXC or container'}: name, type, address, OS, VLAN. Drag a line to reorder it.
+        One line per {getDefinition(node.data.type).role === 'docker-host' ? 'container' : 'VM, LXC or container'}. Drag a line to reorder it.
       </p>
+      {on && (
+        <div className="mt-3">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className="text-xs font-medium text-muted">Show on each line</span>
+            {!isDefault && (
+              <button type="button" onClick={() => update(node.id, { compactFields: DEFAULT_COMPACT_FIELDS })} className="text-[11px] text-subtle hover:text-fg">
+                Reset
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            <span className="flex h-6 items-center gap-1 rounded-md border border-line bg-surface-2 px-1.5 text-[11.5px] text-subtle" title="Always shown">
+              <Eye size={11} /> Name
+            </span>
+            {COMPACT_FIELDS.map((f) => {
+              const active = fields.includes(f.key);
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => toggle(f.key)}
+                  className={cn(
+                    'flex h-6 items-center gap-1 rounded-md border px-1.5 text-[11.5px] transition-colors',
+                    active ? 'border-primary bg-primary-soft text-primary' : 'border-line text-muted hover:text-fg',
+                  )}
+                >
+                  {active ? <Eye size={11} /> : <EyeOff size={11} />}
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </Section>
   );
 }

@@ -4,6 +4,7 @@ import { Canvas } from '../components/canvas/Canvas';
 import { CustomOsDialog } from '../components/dialogs/CustomOsDialog';
 import { ExportDialog } from '../components/dialogs/ExportDialog';
 import { OpenProjectDialog } from '../components/dialogs/OpenProjectDialog';
+import { RulesEditorDialog } from '../components/dialogs/RulesEditorDialog';
 import { ShortcutsDialog } from '../components/dialogs/ShortcutsDialog';
 import { TemplatesDialog } from '../components/dialogs/TemplatesDialog';
 import { RightPanel } from '../components/properties/RightPanel';
@@ -80,6 +81,7 @@ export function WorkspacePage() {
       <TemplatesDialog />
       <ShortcutsDialog />
       <CustomOsDialog />
+      <RulesEditorDialog />
     </ReactFlowProvider>
   );
 }

@@ -2,6 +2,7 @@ import { Lock } from 'lucide-react';
 import { colorOf, getDefinition } from '../../../data/catalog';
 import { extraIps } from '../../../features/nodes/ips';
 import { useDiagram } from '../../../store/diagramStore';
+import { compactFieldsOf, compactHostAbove, type CompactField } from '../../../features/nodes/compact';
 import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
 import { Icon } from '../../icons/Icon';
@@ -25,19 +26,36 @@ export function useInCompactHost(parentId: string | undefined): boolean {
 
 const SHORT_TYPE: Record<string, string> = { 'docker-container': 'CT', 'docker-host': 'Docker', bridge: 'Bridge', storage: 'Storage' };
 
+/** Fields chosen on the compact host above this node (stable string for the store selector). */
+export function useCompactFields(parentId: string | undefined): Set<CompactField> {
+  const key = useDiagram((s) => compactFieldsOf(compactHostAbove(parentId, s.nodes)).join(','));
+  return new Set(key ? (key.split(',') as CompactField[]) : []);
+}
+
+function resources(props: Record<string, unknown>): string {
+  const cpu = str(props.vcpu) || str(props.cores);
+  const ram = str(props.ram);
+  return [cpu && `${cpu} vCPU`, ram].filter(Boolean).join(' · ');
+}
+
 /**
- * A guest drawn as one line in a compact host: only what identifies it —
- * name, type, address, OS (or image), VLAN and active services.
+ * A guest drawn as one line in a compact host, showing only the information
+ * chosen on the host (name is always shown).
  */
-export function CompactRow({ id, data, selected }: { id: string; data: InfraNode['data']; selected?: boolean }) {
+export function CompactRow({ id, data, selected, parentId }: { id: string; data: InfraNode['data']; selected?: boolean; parentId?: string }) {
   const def = getDefinition(data.type);
   const color = data.color ?? colorOf(def);
   const vlan = useVlan(data.props.vlan);
+  const show = useCompactFields(parentId);
   const ip = str(data.props.ip);
   const more = extraIps(data.props).length;
   const docker = def.role === 'docker-container';
   const image = str(data.props.image);
   const tag = str(data.props.tag);
+  const ports = str(data.props.ports);
+  const hostname = str(data.props.hostname);
+  const res = resources(data.props);
+  const description = str(data.props.description);
   const badge = def.badge ?? SHORT_TYPE[data.type];
   return (
     <div
@@ -47,32 +65,33 @@ export function CompactRow({ id, data, selected }: { id: string; data: InfraNode
         def.role === 'lxc' && !selected && 'border-dashed',
       )}
       style={{ borderLeft: `3px solid ${color}` }}
-      title={[data.name, ip, str(data.props.description)].filter(Boolean).join(' · ')}
+      title={[data.name, ip, description].filter(Boolean).join(' · ')}
     >
       <NodeHandles nodeId={id} />
       <span style={{ color }} className="shrink-0">
         <Icon name={def.icon} size={13} brandColor={def.icon.startsWith('brand:')} />
       </span>
       <EditableName id={id} value={data.name} className="max-w-[38%] min-w-0 shrink truncate text-[12px] font-semibold text-fg" />
-      {badge && (
+      {show.has('type') && badge && (
         <span className="shrink-0 rounded px-1 text-[9px] font-bold" style={{ background: alpha(color, 0.14), color }}>
           {badge}
         </span>
       )}
-      {ip && (
-        <span className="shrink-0 font-mono text-[10.5px] text-muted">
-          {ip}
-          {more > 0 && <span className="ml-1 font-sans text-[9.5px] text-subtle">+{more}</span>}
-        </span>
-      )}
-      <span className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
-        {docker ? (
-          image && <span className="truncate font-mono text-[10px] text-muted">{image}{tag ? `:${tag}` : ''}</span>
-        ) : (
-          <OsChip osId={data.props.os} version={data.props.osVersion} />
-        )}
-        <VlanChip vlan={vlan} raw={docker ? '' : str(data.props.vlan)} />
-        <CapabilityBadges props={data.props} max={2} />
+      {show.has('ip') && ip && <span className="shrink-0 font-mono text-[10.5px] text-muted">{ip}</span>}
+      {show.has('moreIps') && more > 0 && <span className="shrink-0 text-[9.5px] text-subtle" title={extraIps(data.props).map((e) => e.address).join(', ')}>+{more} IP</span>}
+      {show.has('hostname') && hostname && <span className="min-w-0 shrink truncate font-mono text-[10px] text-subtle">{hostname}</span>}
+      {show.has('resources') && res && <span className="shrink-0 text-[10px] text-muted">{res}</span>}
+      <span className="min-w-0 flex-1 truncate text-[10.5px] text-subtle">{show.has('description') ? description : ''}</span>
+      <span className="flex min-w-0 shrink items-center justify-end gap-1 overflow-hidden">
+        {show.has('os') &&
+          (docker ? (
+            image && <span className="truncate font-mono text-[10px] text-muted">{image}{tag ? `:${tag}` : ''}</span>
+          ) : (
+            <OsChip osId={data.props.os} version={data.props.osVersion} />
+          ))}
+        {show.has('ports') && ports && <span className="shrink-0 rounded bg-surface-2 px-1 font-mono text-[9.5px] text-muted">{ports}</span>}
+        {show.has('vlan') && <VlanChip vlan={vlan} raw={docker ? '' : str(data.props.vlan)} />}
+        {show.has('services') && <CapabilityBadges props={data.props} max={2} />}
       </span>
       {data.locked && <Lock size={10} className="shrink-0 text-subtle" />}
     </div>
