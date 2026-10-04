@@ -1,0 +1,267 @@
+@import 'tailwindcss';
+@import '@xyflow/react/dist/base.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('./assets/fonts/inter-latin.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('./assets/fonts/jetbrains-mono-latin.woff2') format('woff2-variations');
+}
+
+/* ------------------------------------------------------------------ */
+/* Design tokens                                                       */
+/* ------------------------------------------------------------------ */
+:root,
+.force-light {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-3: #e2e8f0;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #0f172a;
+  --text-muted: #475569;
+  --text-subtle: #94a3b8;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-soft: #eff6ff;
+  --primary-fg: #ffffff;
+  --canvas: #f6f8fb;
+  --grid: #cdd5e0;
+  --node-bg: #ffffff;
+  --node-border: #e2e8f0;
+  --node-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.04);
+  --edge-label-bg: #ffffff;
+  --danger: #dc2626;
+  --warning: #d97706;
+  --success: #059669;
+  --overlay: rgb(15 23 42 / 0.4);
+  color-scheme: light;
+}
+
+.dark,
+.force-dark {
+  --bg: #0b1120;
+  --surface: #0f172a;
+  --surface-2: #1e293b;
+  --surface-3: #334155;
+  --border: #1e293b;
+  --border-strong: #334155;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --text-subtle: #64748b;
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-soft: rgb(59 130 246 / 0.12);
+  --primary-fg: #ffffff;
+  --canvas: #0b1120;
+  --grid: #1f2a3d;
+  --node-bg: #111a2e;
+  --node-border: #24324a;
+  --node-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --edge-label-bg: #111a2e;
+  --danger: #f87171;
+  --warning: #fbbf24;
+  --success: #34d399;
+  --overlay: rgb(2 6 23 / 0.6);
+  color-scheme: dark;
+}
+
+/* .force-light inside .dark needs to win over the inherited dark values */
+.dark .force-light {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-3: #e2e8f0;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #0f172a;
+  --text-muted: #475569;
+  --text-subtle: #94a3b8;
+  --canvas: #ffffff;
+  --node-bg: #ffffff;
+  --node-border: #e2e8f0;
+  --node-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.04);
+  --edge-label-bg: #ffffff;
+}
+
+@theme inline {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-fg: var(--text);
+  --color-muted: var(--text-muted);
+  --color-subtle: var(--text-subtle);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-fg: var(--primary-fg);
+  --color-canvas: var(--canvas);
+  --color-node: var(--node-bg);
+  --color-node-line: var(--node-border);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------------ */
+/* React Flow                                                          */
+/* ------------------------------------------------------------------ */
+.react-flow {
+  --xy-background-color: var(--canvas);
+  --xy-background-pattern-color: var(--grid);
+  --xy-selection-background-color: rgb(37 99 235 / 0.08);
+  --xy-selection-border: 1px solid rgb(37 99 235 / 0.5);
+  --xy-resize-background-color: var(--primary);
+  --xy-handle-background-color: var(--primary);
+  --xy-handle-border-color: var(--surface);
+  background: var(--canvas);
+  color: var(--text);
+}
+
+.react-flow__node {
+  font-family: var(--font-sans);
+}
+
+/* Handles: invisible until hover/selection */
+.infra-handle {
+  width: 10px !important;
+  height: 10px !important;
+  border: 2px solid var(--surface) !important;
+  background: var(--primary) !important;
+  opacity: 0;
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 5;
+}
+.react-flow__node:hover .infra-handle,
+.react-flow__node.selected .infra-handle {
+  opacity: 1;
+}
+.infra-handle:hover {
+  background: var(--primary-hover) !important;
+}
+.react-flow__handle.hidden-handle {
+  opacity: 0 !important;
+  pointer-events: none;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+}
+/* While dragging a connection, the whole target node becomes a drop zone */
+.react-flow__handle.body-handle {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  transform: none !important;
+  border-radius: 10px;
+  opacity: 0;
+  background: transparent;
+  border: 0;
+}
+.react-flow__handle.body-handle.connectingto,
+.react-flow__handle.body-handle:hover {
+  opacity: 1;
+  background: rgb(37 99 235 / 0.06);
+  outline: 2px dashed var(--primary);
+  outline-offset: 3px;
+}
+
+.react-flow__resize-control.handle {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--surface);
+  border: 1.5px solid var(--primary);
+}
+.react-flow__resize-control.line {
+  border-color: transparent;
+}
+
+.react-flow__edge.selected .network-edge-path,
+.react-flow__edge:hover .network-edge-path {
+  filter: drop-shadow(0 0 3px rgb(37 99 235 / 0.45));
+}
+
+.react-flow__minimap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* Export mode: hide selection decorations */
+.exporting .react-flow__node.selected > * {
+  box-shadow: var(--node-shadow) !important;
+}
+.exporting .selection-ring,
+.exporting .react-flow__edge.selected .network-edge-path {
+  filter: none !important;
+}
+.exporting .selection-ring {
+  outline: none !important;
+}
+
+/* Presentation mode */
+.presentation .infra-handle {
+  display: none;
+}
+
+/* Light motion */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+.animate-fade-in { animation: fade-in 160ms ease-out both; }
+.animate-pop-in { animation: pop-in 140ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
