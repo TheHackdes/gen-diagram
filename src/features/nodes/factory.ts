@@ -2,6 +2,7 @@ import type { XYPosition } from '@xyflow/react';
 import { getDefinition } from '../../data/catalog';
 import type { InfraNode, LibraryPreset } from '../../types';
 import { uid } from '../../utils/misc';
+import { fitDeviceHeight } from './ips';
 
 const NAME_PREFIX: Record<string, string> = {
   router: 'rtr',
@@ -88,7 +89,7 @@ export function createNode(type: string, opts: CreateNodeOptions): InfraNode {
   if (!opts.size && AUTO_HEIGHT.has(def.renderer)) delete node.height;
   if (!opts.size && AUTO_WIDTH.has(def.renderer)) delete node.width;
   if (opts.parentId) node.parentId = opts.parentId;
-  return withLayer(node);
+  return withLayer(fitDeviceHeight(node));
 }
 
 /** Areas render behind equipment at the same nesting level so they never hide it. */

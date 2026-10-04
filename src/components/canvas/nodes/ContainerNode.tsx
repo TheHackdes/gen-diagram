@@ -6,7 +6,8 @@ import { useDiagram } from '../../../store/diagramStore';
 import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
 import { cn } from '../../ui/cn';
-import { EditableName, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChip } from './shared';
+import { extraIps } from '../../../features/nodes/ips';
+import { CapabilityBadges, EditableName, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChip } from './shared';
 
 const RUNS_ON: Record<string, string> = { vm: 'VM', physical: 'Bare metal', lxc: 'LXC' };
 
@@ -49,9 +50,17 @@ function ContainerNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
               </span>
             )}
           </div>
-          <span className="block truncate font-mono text-[10.5px] text-muted">{meta || def.label}</span>
+          <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-muted">
+            <span className="truncate">{meta || def.label}</span>
+            {extraIps(data.props).length > 0 && (
+              <span className="shrink-0 rounded bg-surface-2 px-1 text-[9.5px]" title={extraIps(data.props).map((e) => `${e.address}${e.label ? ` (${e.label})` : ''}`).join('\n')}>
+                +{extraIps(data.props).length} IP
+              </span>
+            )}
+          </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <CapabilityBadges props={data.props} />
           <OsChip osId={data.props.os} version={data.props.osVersion} />
           <VlanChip vlan={vlan} raw={str(data.props.vlan)} />
           <span

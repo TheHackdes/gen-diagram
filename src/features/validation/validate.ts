@@ -2,6 +2,7 @@ import { definitionHasField, getDefinition } from '../../data/catalog';
 import type { InfraEdge, InfraNode, ValidationIssue, Vlan } from '../../types';
 import { cidrEquals, ipInCidr, isValidCidr, isValidIPv4, isValidMac, parseCidr } from '../../utils/ip';
 import { str } from '../../utils/misc';
+import { extraIps, hasHostFirewall, hasVpn } from '../nodes/ips';
 
 const ZONE_TYPES = new Set(['vlan-zone', 'subnet', 'network-zone', 'dmz', 'docker-network']);
 
@@ -58,11 +59,26 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
     }
   }
 
+  // --- Additional addresses ------------------------------------------
+  for (const n of nodes) {
+    for (const e of extraIps(n.data.props)) {
+      if (!e.address) continue;
+      if (!isValidIPv4(e.address)) {
+        push({ severity: 'error', message: `${n.data.name}: "${e.address}" is not a valid IPv4 address (additional IP)`, nodeIds: [n.id] });
+        continue;
+      }
+      const vlan = e.vlan ? vlanById.get(e.vlan) : undefined;
+      if (e.vlan && !vlan) push({ severity: 'warning', message: `${n.data.name}: ${e.address} references VLAN ${e.vlan} which is not defined`, nodeIds: [n.id] });
+      if (vlan?.subnet && ipInCidr(e.address, vlan.subnet) === false)
+        push({ severity: 'warning', message: `${n.data.name}: ${e.address} is outside VLAN ${vlan.id} subnet ${vlan.subnet}`, nodeIds: [n.id] });
+    }
+  }
+
   // --- Duplicate IPs --------------------------------------------------
   const ipOwners = new Map<string, InfraNode[]>();
   for (const n of nodes) {
-    for (const key of ['ip', 'publicIp', 'vip']) {
-      const ip = str(n.data.props[key]).trim();
+    const addresses = [...['ip', 'publicIp', 'vip'].map((k) => str(n.data.props[k]).trim()), ...extraIps(n.data.props).map((e) => e.address.trim())];
+    for (const ip of new Set(addresses)) {
       if (!isValidIPv4(ip)) continue;
       ipOwners.set(ip, [...(ipOwners.get(ip) ?? []), n]);
     }
@@ -163,6 +179,17 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
       push({ severity: 'warning', message: `${s.data.name} ↔ ${t.data.name}: Wi-Fi link without an access point`, edgeIds: [e.id] });
     if (physical && (ancestors(s, byId).some((a) => a.id === t.id) || ancestors(t, byId).some((a) => a.id === s.id)))
       push({ severity: 'info', message: `${s.data.name} ↔ ${t.data.name}: physical link between a host and its own guest`, edgeIds: [e.id] });
+    if (type === 'vpn') {
+      // Clients (laptops, phones) and clouds bring their own VPN endpoint.
+      const capable = (n: InfraNode) => hasVpn(n) || ['endpoint', 'cloud', 'wan'].includes(getDefinition(n.data.type).role);
+      for (const n of [s, t].filter((x) => !capable(x)))
+        push({
+          severity: 'warning',
+          message: `VPN tunnel ${s.data.name} ↔ ${t.data.name}: ${n.data.name} has no VPN gateway${getDefinition(n.data.type).capabilities?.includes('vpn') ? ' (enable “Integrated VPN”)' : ''}`,
+          nodeIds: [n.id],
+          edgeIds: [e.id],
+        });
+    }
     const vlan = e.data?.vlan;
     if (vlan && e.data?.mode !== 'trunk') {
       for (const id of vlan.split(/[\s,]+/).filter(Boolean)) {
@@ -181,6 +208,21 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
       nodeIds: [nodeId],
       edgeIds: ids,
     });
+  }
+
+  // --- Integrated services ---------------------------------------------
+  for (const n of nodes) {
+    const def = getDefinition(n.data.type);
+    if (!def.capabilities?.includes('firewall') || hasHostFirewall(n)) continue;
+    if (ancestors(n, byId).some((a) => a.data.type === 'dmz'))
+      push({ severity: 'info', message: `${n.data.name} is exposed in the DMZ without a host firewall`, nodeIds: [n.id] });
+  }
+  for (const n of nodes) {
+    if (n.data.props.vpn !== true) continue;
+    const tunnel = str(n.data.props.vpnNetwork);
+    if (!tunnel) continue;
+    const clash = vlans.find((v) => v.subnet && cidrEquals(v.subnet, tunnel));
+    if (clash) push({ severity: 'warning', message: `${n.data.name}: VPN tunnel network ${tunnel} overlaps VLAN ${clash.id}`, nodeIds: [n.id] });
   }
 
   // --- Isolated equipment ----------------------------------------------

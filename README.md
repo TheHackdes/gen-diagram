@@ -12,6 +12,11 @@ npm run build      # type-check (strict) + production build in dist/
 
 On first launch a complete demo project ("Acme HQ") is created and opened.
 
+## Highlights
+
+- **Multiple IP addresses**: every addressable node has a main IP plus a list of additional addresses (interface label + VLAN), shown on the card, included in validation (format, subnet, duplicates) and IP suggestions.
+- **Integrated services**: routers (and firewalls) can enable an *integrated VPN gateway* (protocol, mode, endpoint, tunnel network); servers, VMs, LXC, hypervisors, Docker hosts and workstations can enable a *host firewall* (nftables, ufw, firewalld, Windows Defender Firewall, pf…). Cards show `VPN` / `FW` badges, links between two VPN-capable devices are detected as tunnels (`wg0`, `ipsec0`, `tun0`), and validation flags tunnels to devices without VPN and DMZ hosts without a host firewall. Capabilities are declared per role in `src/data/catalog/index.ts` and can be overridden per definition (`capabilities`).
+
 ## Stack
 
 React 19 · TypeScript (strict) · Vite · Tailwind CSS v4 · React Flow (`@xyflow/react`) · Zustand · dagre + d3-force (auto layout) · html-to-image + jsPDF (export) · Lucide + Simple Icons (icons).

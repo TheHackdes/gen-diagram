@@ -14,6 +14,7 @@ import { VLAN_COLORS } from '../data/templates/builder';
 import { suggestConnection } from '../features/connections/suggest';
 import { autoLayout } from '../features/layout/autoLayout';
 import { createNode, createNodeFromPreset, withLayer } from '../features/nodes/factory';
+import { fitDeviceHeight } from '../features/nodes/ips';
 import {
   absolutePosition,
   descendantIds,
@@ -363,7 +364,11 @@ export const useDiagram = create<DiagramState>((set, get) => {
     updateNodeProps: (id, patch) => {
       get().checkpoint(`props:${id}:${Object.keys(patch).join(',')}`);
       set({
-        nodes: get().nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, props: { ...n.data.props, ...patch } } } : n)),
+        nodes: get().nodes.map((n) => {
+          if (n.id !== id) return n;
+          const next = { ...n, data: { ...n.data, props: { ...n.data.props, ...patch } } };
+          return 'ips' in patch ? fitDeviceHeight(next) : next;
+        }),
         dirty: true,
       });
     },

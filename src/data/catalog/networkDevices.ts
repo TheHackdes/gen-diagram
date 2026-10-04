@@ -15,7 +15,7 @@ export const NETWORK_DEVICES: ComponentDefinition[] = [
     role: 'router',
     icon: 'router',
     description: 'Layer 3 router connecting networks.',
-    keywords: ['gateway', 'routing', 'bgp', 'ospf'],
+    keywords: ['gateway', 'routing', 'bgp', 'ospf', 'vpn', 'wireguard', 'ipsec'],
     fields: NETWORK_DEVICE_FIELDS,
     portPattern: ethPorts('Gi0/', 0),
   }),

@@ -1,6 +1,7 @@
 import { getDefinition } from '../../data/catalog';
 import type { ConnectionType, InfraEdge, InfraEdgeData, InfraNode, NodeRole } from '../../types';
 import { str } from '../../utils/misc';
+import { hasVpn } from '../nodes/ips';
 
 const SWITCHING: NodeRole[] = ['switch', 'core-switch'];
 const INFRA_TRUNK: NodeRole[] = ['switch', 'core-switch', 'router', 'firewall', 'hypervisor', 'ap', 'bridge'];
@@ -53,7 +54,9 @@ function inferType(a: InfraNode, b: InfraNode): ConnectionType {
 
   if (a.data.type === 'arrow' || b.data.type === 'arrow') return 'arrow';
   if (getDefinition(a.data.type).kind === 'annotation' || getDefinition(b.data.type).kind === 'annotation') return 'arrow';
-  if (has('vpn') && (has('wan') || has('cloud') || ra === rb)) return 'vpn';
+  // Two VPN-capable ends (dedicated gateway or router/firewall with integrated VPN) → tunnel.
+  if (hasVpn(a) && hasVpn(b)) return 'vpn';
+  if (has('vpn') && (has('wan') || has('cloud'))) return 'vpn';
   if (has('wan') || has('cloud')) return 'wan';
   if (has('ap') && (WIRELESS_CLIENTS.has(a.data.type) || WIRELESS_CLIENTS.has(b.data.type))) return 'wifi';
   if (a.data.type === 'san' || b.data.type === 'san') return 'fiber';
@@ -80,7 +83,19 @@ export function suggestConnection(
   const rs = getDefinition(source.data.type).role;
   const rt = getDefinition(target.data.type).role;
 
-  if (connType !== 'wan' && connType !== 'vpn') {
+  if (connType === 'vpn') {
+    // A tunnel lands on a virtual interface, not on a physical port.
+    const tunnelIf = (n: InfraNode) => {
+      const proto = str(n.data.props.vpnProtocol) || str(n.data.props.protocol);
+      return proto === 'WireGuard' ? 'wg0' : proto === 'OpenVPN' ? 'tun0' : proto ? 'ipsec0' : '';
+    };
+    if (hasVpn(source)) data.sourcePort = tunnelIf(source);
+    if (hasVpn(target)) data.targetPort = tunnelIf(target);
+    const proto = str(source.data.props.vpnProtocol) || str(target.data.props.vpnProtocol) || str(source.data.props.protocol) || str(target.data.props.protocol);
+    if (proto) data.label = proto;
+    return data;
+  }
+  if (connType !== 'wan') {
     data.sourcePort = nextPort(source, edges);
     data.targetPort = nextPort(target, edges);
   } else {

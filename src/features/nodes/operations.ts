@@ -4,6 +4,7 @@ import type { InfraEdge, InfraNode } from '../../types';
 import { formatIPv4, parseCidr, parseIPv4 } from '../../utils/ip';
 import { str, uid } from '../../utils/misc';
 import { createNode, uniqueName } from './factory';
+import { allIps } from './ips';
 import { absolutePosition, descendantIds, indexById, nodeSize, sortByHierarchy } from './hierarchy';
 
 export interface ClipboardData {
@@ -55,7 +56,7 @@ function nextFreeIp(ip: string, used: Set<string>): string {
 }
 
 export function usedIps(nodes: InfraNode[]): Set<string> {
-  return new Set(nodes.map((n) => str(n.data.props.ip)).filter(Boolean));
+  return new Set(nodes.flatMap((n) => allIps(n.data.props).map((e) => e.address)).filter(Boolean));
 }
 
 /** First free address of a subnet starting at host .10 (for suggestions). */

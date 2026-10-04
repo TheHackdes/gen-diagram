@@ -144,6 +144,24 @@ export function demoProject(): TemplateResult {
     product: 'OPNsense 25.7',
     vlan: '99',
     model: 'DEC2750',
+    vpn: true,
+    vpnProtocol: 'WireGuard',
+    vpnMode: 'Site-to-site + remote access',
+    vpnEndpoint: 'vpn.acme.example',
+    vpnNetwork: '10.99.0.0/24',
+  });
+  const branch = b.add('router', 'branch-rtr-01', {
+    ip: '10.20.0.1',
+    model: 'MikroTik RB5009',
+    vpn: true,
+    vpnProtocol: 'WireGuard',
+    vpnMode: 'Site-to-site',
+    vpnEndpoint: '198.51.100.20',
+    vpnNetwork: '10.99.0.0/24',
+    fw: true,
+    fwProduct: 'Other',
+    fwPolicy: 'Default deny',
+    description: 'Lyon branch office router with integrated VPN',
   });
   const core = b.add('l3-switch', 'core-sw-01', {
     ip: '192.168.99.2',
@@ -154,7 +172,18 @@ export function demoProject(): TemplateResult {
 
   const mgmt = b.vlanZone(10);
   const admin = b.add('pc', 'admin-pc-01', { os: 'windows-11', osVersion: '24H2', ip: '192.168.10.50', vlan: '10', user: 'IT admin' }, mgmt);
-  const bastion = b.add('bastion', 'bastion-01', { os: 'debian', osVersion: '13', ip: '192.168.10.10', vlan: '10', gateway: '192.168.10.1' }, mgmt);
+  const bastion = b.add('bastion', 'bastion-01', {
+    os: 'debian',
+    osVersion: '13',
+    ip: '192.168.10.10',
+    vlan: '10',
+    gateway: '192.168.10.1',
+    ips: [{ address: '192.168.99.5', label: 'mgmt', vlan: '99' }],
+    fw: true,
+    fwProduct: 'nftables',
+    fwPolicy: 'Default deny',
+    fwRules: 'allow tcp/22 from 192.168.10.0/24',
+  }, mgmt);
 
   const servers = b.vlanZone(20);
   const pve = b.add('proxmox', 'pve-01', {
@@ -164,9 +193,13 @@ export function demoProject(): TemplateResult {
     vlan: '20',
     cpu: '2× EPYC 9124',
     ram: '256 GB',
+    ips: [
+      { address: '192.168.99.10', label: 'mgmt', vlan: '99' },
+      { address: '10.10.10.10', label: 'storage (NFS)' },
+    ],
   }, servers);
   b.add('vm', 'app-01', { os: 'debian', osVersion: '13', ip: '192.168.20.21', vlan: '20', vmid: '101', vcpu: '4', ram: '8 GB', role: 'Application server' }, pve);
-  b.add('vm', 'dc-01', { os: 'windows-server', osVersion: '2022', ip: '192.168.20.11', vlan: '20', vmid: '100', vcpu: '2', ram: '4 GB', description: 'Active Directory domain controller' }, pve);
+  b.add('vm', 'dc-01', { os: 'windows-server', osVersion: '2022', ip: '192.168.20.11', vlan: '20', vmid: '100', vcpu: '2', ram: '4 GB', description: 'Active Directory domain controller', fw: true, fwProduct: 'Windows Defender Firewall', fwPolicy: 'Default deny' }, pve);
   b.add('lxc', 'dns-01', { os: 'debian', osVersion: '12', ip: '192.168.20.53', vlan: '20', ctid: '200', cores: '1', ram: '512 MB', description: 'Unbound resolver' }, pve);
   b.add('lxc', 'monitor-01', { os: 'alpine', osVersion: '3.22', ip: '192.168.20.60', vlan: '20', ctid: '201', cores: '2', ram: '2 GB', description: 'Prometheus + Grafana' }, pve);
   const docker = b.add('docker-host', 'docker-01', { os: 'ubuntu', osVersion: '24.04', ip: '192.168.20.30', vlan: '20', runsOn: 'vm' }, pve);
@@ -175,8 +208,8 @@ export function demoProject(): TemplateResult {
   const back = b.add('docker-container', 'backend', { image: 'acme/backend', tag: '2.4.1', ip: '172.20.0.12', dockerNetwork: 'backend' }, docker);
   const pg = b.add('docker-container', 'postgres', { image: 'postgres', tag: '17', ip: '172.20.0.20', dockerNetwork: 'backend' }, docker);
   const redis = b.add('docker-container', 'redis', { image: 'redis', tag: '7.4', ip: '172.20.0.21', dockerNetwork: 'backend' }, docker);
-  const db = b.add('database-server', 'db-01', { os: 'rocky', osVersion: '9', ip: '192.168.20.40', vlan: '20', role: 'MariaDB (ERP)', gateway: '192.168.20.1' }, servers);
-  const nas = b.add('nas', 'nas-01', { ip: '192.168.20.50', vlan: '20', capacity: '48 TB', protocols: 'NFS, SMB' }, servers);
+  const db = b.add('database-server', 'db-01', { os: 'rocky', osVersion: '9', ip: '192.168.20.40', vlan: '20', role: 'MariaDB (ERP)', gateway: '192.168.20.1', fw: true, fwProduct: 'firewalld', fwPolicy: 'Default deny' }, servers);
+  const nas = b.add('nas', 'nas-01', { ip: '192.168.20.50', vlan: '20', capacity: '48 TB', protocols: 'NFS, SMB', ips: [{ address: '10.10.10.50', label: 'storage (NFS)' }] }, servers);
 
   const users = b.vlanZone(30);
   const ap = b.add('access-point', 'ap-01', { ip: '192.168.99.20', vlan: '99', ssid: 'Acme, Acme-Guest', band: 'Dual band' }, users);
@@ -184,10 +217,11 @@ export function demoProject(): TemplateResult {
   const prn = b.add('printer', 'prn-01', { ip: '192.168.30.20', vlan: '30' }, users);
 
   const dmz = b.vlanZone(50);
-  const rproxy = b.add('reverse-proxy', 'rproxy-01', { os: 'debian', osVersion: '13', ip: '192.168.50.10', vlan: '50', gateway: '192.168.50.1' }, dmz);
-  const web = b.add('web-server', 'web-01', { os: 'ubuntu', osVersion: '24.04', ip: '192.168.50.20', vlan: '50', gateway: '192.168.50.1' }, dmz);
+  const rproxy = b.add('reverse-proxy', 'rproxy-01', { os: 'debian', osVersion: '13', ip: '192.168.50.10', vlan: '50', gateway: '192.168.50.1', fw: true, fwProduct: 'nftables', fwPolicy: 'Default deny', fwRules: 'allow tcp/80,443 from any' }, dmz);
+  const web = b.add('web-server', 'web-01', { os: 'ubuntu', osVersion: '24.04', ip: '192.168.50.20', vlan: '50', gateway: '192.168.50.1', fw: true, fwProduct: 'ufw', fwPolicy: 'Default deny', fwRules: 'allow tcp/8080 from 192.168.50.10' }, dmz);
 
   b.link(inet, fw, { targetPort: 'port1 (WAN)' });
+  b.link(fw, branch, { description: 'Site-to-site tunnel to the Lyon branch' });
   b.link(fw, core, { connType: 'fiber', sourcePort: 'port2', mode: 'trunk', vlan: '10,20,30,99' });
   b.link(fw, rproxy, { sourcePort: 'port3', mode: 'access', vlan: '50' });
   b.link(rproxy, web, { connType: 'logical', label: 'HTTPS' });
@@ -209,7 +243,7 @@ export function demoProject(): TemplateResult {
 }
 
 export const TEMPLATES: TemplateInfo[] = [
-  { id: 'demo', name: 'Acme HQ (demo)', description: 'Complete example: VLANs, DMZ, Proxmox with VMs, LXC and Docker.', tags: ['Proxmox', 'Docker', 'VLAN'], build: demoProject },
+  { id: 'demo', name: 'Acme HQ (demo)', description: 'Complete example: VLANs, DMZ, Proxmox with VMs, LXC and Docker, site-to-site VPN, host firewalls.', tags: ['Proxmox', 'Docker', 'VLAN'], build: demoProject },
   { id: 'small-office', name: 'Small office', description: 'Internet, firewall, switch, PCs and a file server.', tags: ['SMB'], build: smallOffice },
   { id: 'proxmox', name: 'Proxmox homelab', description: 'Proxmox node with VMs, LXC containers and NAS.', tags: ['Proxmox', 'Homelab'], build: proxmoxLab },
   { id: 'three-tier', name: '3-tier application', description: 'Load balancer, web, application and database tiers.', tags: ['Web', 'HA'], build: threeTier },

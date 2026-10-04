@@ -1,7 +1,8 @@
-import type { ComponentDefinition, LibraryPreset, OperatingSystem } from '../../types';
+import type { Capability, ComponentDefinition, FieldDef, LibraryPreset, NodeRole, OperatingSystem } from '../../types';
 import { CATEGORY_BY_ID } from '../categories';
 import { getAllOperatingSystems } from '../operatingSystems';
 import { ANNOTATIONS } from './annotations';
+import { FIREWALL_FIELDS, IP_LIST_FIELD, VPN_FIELDS } from './fields';
 import { GENERIC, LOGICAL } from './logicalGeneric';
 import { NETWORK_DEVICES } from './networkDevices';
 import { SERVERS } from './servers';
@@ -14,7 +15,7 @@ import { VIRTUALIZATION } from './virtualization';
  * (or a new file) and append it here. Everything else (library, search,
  * properties panel, validation, layout) is driven by the definition.
  */
-export const DEFINITIONS: ComponentDefinition[] = [
+const BASE_DEFINITIONS: ComponentDefinition[] = [
   ...NETWORK_DEVICES,
   ...SERVERS,
   ...VIRTUALIZATION,
@@ -24,6 +25,36 @@ export const DEFINITIONS: ComponentDefinition[] = [
   ...GENERIC,
   ...ANNOTATIONS,
 ];
+
+/** Integrated services available by default for each role (a definition can override them). */
+const DEFAULT_CAPABILITIES: Partial<Record<NodeRole, Capability[]>> = {
+  router: ['vpn', 'firewall'],
+  firewall: ['vpn'],
+  server: ['firewall'],
+  security: ['firewall'],
+  hypervisor: ['firewall'],
+  vm: ['firewall'],
+  lxc: ['firewall'],
+  'docker-host': ['firewall'],
+  endpoint: ['firewall'],
+};
+
+const CAPABILITY_FIELDS: Record<Capability, FieldDef[]> = { vpn: VPN_FIELDS, firewall: FIREWALL_FIELDS };
+
+/**
+ * Every addressable node gets a list of additional IPs right after its main
+ * IP, plus the fields of its integrated services.
+ */
+function enrich(def: ComponentDefinition): ComponentDefinition {
+  const ipIndex = def.fields.findIndex((f) => f.key === 'ip');
+  if (ipIndex < 0) return def;
+  const fields = [...def.fields.slice(0, ipIndex + 1), IP_LIST_FIELD, ...def.fields.slice(ipIndex + 1)];
+  const capabilities = def.capabilities ?? DEFAULT_CAPABILITIES[def.role] ?? [];
+  for (const c of capabilities) fields.push(...CAPABILITY_FIELDS[c]);
+  return { ...def, fields, capabilities };
+}
+
+export const DEFINITIONS: ComponentDefinition[] = BASE_DEFINITIONS.map(enrich);
 
 const BY_TYPE = new Map(DEFINITIONS.map((d) => [d.type, d]));
 

@@ -5,6 +5,7 @@ import { isValidCidr, isValidIPv4, isValidMac } from '../../utils/ip';
 import { str } from '../../utils/misc';
 import { cn } from '../ui/cn';
 import { FieldRow, Input, Select, Switch, Textarea } from '../ui/Field';
+import { IpListEditor } from './IpListEditor';
 import { OsPicker } from './OsPicker';
 import { suggestionFor } from './suggestions';
 
@@ -113,6 +114,13 @@ export function FieldEditor({ node, field }: { node: InfraNode; field: FieldDef 
   const id = `f-${node.id}-${field.key}`;
 
   if (field.type === 'os') return <OsPicker nodeId={node.id} osId={node.data.props.os} version={node.data.props.osVersion} />;
+
+  if (field.type === 'ipList')
+    return (
+      <FieldRow label={field.label}>
+        <IpListEditor node={node} />
+      </FieldRow>
+    );
 
   if (field.type === 'boolean')
     return <Switch id={id} label={field.label} checked={node.data.props[field.key] === true} onChange={(v) => set(v)} />;

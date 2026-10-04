@@ -6,7 +6,8 @@ import { getOperatingSystem } from '../../../data/operatingSystems';
 import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
 import { cn } from '../../ui/cn';
-import { EditableName, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChip } from './shared';
+import { extraIps, requiredHeight } from '../../../features/nodes/ips';
+import { CapabilityBadges, EditableName, ExtraIpLines, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChip } from './shared';
 
 function DeviceNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
   const def = getDefinition(data.type);
@@ -38,6 +39,11 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
             {image ? `${image}${tag ? `:${tag}` : ''}` : ip || 'container'}
           </span>
         </div>
+        {extraIps(data.props).length > 0 && (
+          <span className="shrink-0 rounded bg-surface-2 px-1 font-mono text-[9px] text-muted" title={extraIps(data.props).map((e) => e.address).join(', ')}>
+            +{extraIps(data.props).length} IP
+          </span>
+        )}
         {ports && (
           <span className="shrink-0 rounded bg-surface-2 px-1 font-mono text-[9px] text-muted" title={ports}>
             :{ports.split(',')[0].split(':')[0].trim()}
@@ -50,7 +56,9 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
   }
 
   const subtitle = ip || str(data.props.role) || str(data.props.product) || def.label;
-  const showChips = !!os || !!vlan || !!str(data.props.vlan);
+  const hasCaps = data.props.fw === true || data.props.vpn === true;
+  const showChips = !!os || !!vlan || !!str(data.props.vlan) || hasCaps;
+  const minHeight = requiredHeight({ data } as InfraNode) - 16;
 
   return (
     <div
@@ -65,7 +73,7 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
         borderWidth: isLxc ? 1.5 : undefined,
       }}
     >
-      <Resizer id={id} selected={selected} minWidth={140} minHeight={48} locked={data.locked} />
+      <Resizer id={id} selected={selected} minWidth={140} minHeight={Math.max(48, minHeight)} locked={data.locked} />
       <NodeHandles nodeId={id} />
       <IconTile
         icon={def.icon}
@@ -86,10 +94,12 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
           )}
         </div>
         <span className={cn('block truncate text-[11px] text-muted', ip && 'font-mono text-[10.5px]')}>{subtitle}</span>
+        <ExtraIpLines props={data.props} />
         {showChips && (
           <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
             <VlanChip vlan={vlan} raw={str(data.props.vlan)} />
             <OsChip osId={data.props.os} version={data.props.osVersion} />
+            <CapabilityBadges props={data.props} />
           </div>
         )}
       </div>

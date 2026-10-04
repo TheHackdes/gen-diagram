@@ -1,15 +1,16 @@
-import { ChevronDown, CopyPlus, Lock, LockOpen, LogOut, Plus, RotateCcw, Trash } from 'lucide-react';
+import { ChevronDown, CopyPlus, KeyRound, Lock, LockOpen, LogOut, Plus, RotateCcw, ShieldCheck, Trash } from 'lucide-react';
 import { useState } from 'react';
 import { CATEGORY_BY_ID } from '../../data/categories';
 import { colorOf, getDefinition, getPreset } from '../../data/catalog';
 import { CONNECTION_STYLE } from '../../features/connections/suggest';
 import { useDiagram } from '../../store/diagramStore';
-import type { InfraNode } from '../../types';
+import { getOperatingSystem } from '../../data/operatingSystems';
+import type { Capability, InfraNode } from '../../types';
 import { alpha, str } from '../../utils/misc';
 import { Icon } from '../icons/Icon';
 import { Button, IconButton } from '../ui/Button';
 import { cn } from '../ui/cn';
-import { FieldRow, Input } from '../ui/Field';
+import { FieldRow, Input, Switch } from '../ui/Field';
 import { FieldEditor } from './FieldEditor';
 
 const ACCENTS = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2', '#db2777', '#475569'];
@@ -53,6 +54,67 @@ function QuickAdd({ node }: { node: InfraNode }) {
         })}
       </div>
     </Section>
+  );
+}
+
+const CAPABILITY_INFO: Record<Capability, { title: string; toggle: string; icon: React.ReactNode; color: string; hint: string }> = {
+  vpn: {
+    title: 'Integrated VPN',
+    toggle: 'vpn',
+    icon: <KeyRound size={14} />,
+    color: '#059669',
+    hint: 'This equipment also terminates VPN tunnels — no separate VPN gateway needed.',
+  },
+  firewall: {
+    title: 'Host firewall',
+    toggle: 'fw',
+    icon: <ShieldCheck size={14} />,
+    color: '#dc2626',
+    hint: 'Firewall running directly on this machine (nftables, ufw, Windows Firewall…).',
+  },
+};
+
+/** Sensible defaults when a service is switched on. */
+function enableDefaults(node: InfraNode, capability: Capability): Record<string, unknown> {
+  const p = node.data.props;
+  if (capability === 'vpn') {
+    return { vpn: true, vpnProtocol: str(p.vpnProtocol) || 'WireGuard', vpnMode: str(p.vpnMode) || 'Site-to-site', vpnEndpoint: str(p.vpnEndpoint) || str(p.publicIp) };
+  }
+  const family = getOperatingSystem(p.os)?.family;
+  const product = family === 'windows' ? 'Windows Defender Firewall' : family === 'bsd' || family === 'macos' ? 'pf' : p.os === 'ubuntu' ? 'ufw' : ['rhel', 'rocky', 'alma', 'fedora', 'centos'].includes(str(p.os)) ? 'firewalld' : 'nftables';
+  return { fw: true, fwProduct: str(p.fwProduct) || product, fwPolicy: str(p.fwPolicy) || 'Default deny' };
+}
+
+function CapabilitySection({ node, capability }: { node: InfraNode; capability: Capability }) {
+  const def = getDefinition(node.data.type);
+  const update = useDiagram((s) => s.updateNodeProps);
+  const info = CAPABILITY_INFO[capability];
+  const enabled = node.data.props[info.toggle] === true;
+  const fields = def.fields.filter((f) => f.section === capability && f.type !== 'boolean');
+  return (
+    <section className="border-b border-line px-4 py-3.5">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: alpha(info.color, enabled ? 0.14 : 0.07), color: enabled ? info.color : 'var(--text-subtle)' }}>
+          {info.icon}
+        </span>
+        <div className="min-w-0 flex-1">
+          <Switch
+            id={`cap-${node.id}-${capability}`}
+            label={<span className="font-medium">{info.title}</span>}
+            checked={enabled}
+            onChange={(v) => update(node.id, v ? enableDefaults(node, capability) : { [info.toggle]: false })}
+          />
+        </div>
+      </div>
+      {!enabled && <p className="mt-1.5 pl-[38px] text-[11.5px] leading-snug text-subtle">{info.hint}</p>}
+      {enabled && (
+        <div className="mt-3 animate-fade-in space-y-3">
+          {fields.map((f) => (
+            <FieldEditor key={f.key} node={node} field={f} />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -100,8 +162,8 @@ export function NodeProperties({ node }: { node: InfraNode }) {
   const parentName = useDiagram((s) => (node.parentId ? s.nodes.find((n) => n.id === node.parentId)?.data.name : undefined));
   const [advanced, setAdvanced] = useState(false);
   const color = node.data.color ?? colorOf(def);
-  const basic = def.fields.filter((f) => !f.advanced);
-  const extra = def.fields.filter((f) => f.advanced);
+  const basic = def.fields.filter((f) => !f.advanced && !f.section);
+  const extra = def.fields.filter((f) => f.advanced && !f.section);
   const filledAdvanced = extra.filter((f) => str(node.data.props[f.key])).length;
   const named = def.kind !== 'annotation';
 
@@ -165,6 +227,8 @@ export function NodeProperties({ node }: { node: InfraNode }) {
           </div>
         )}
       </Section>
+
+      {def.capabilities?.map((c) => <CapabilitySection key={c} node={node} capability={c} />)}
 
       <Connections node={node} />
 

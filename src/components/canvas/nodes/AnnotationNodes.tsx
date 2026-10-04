@@ -5,7 +5,7 @@ import { useDiagram } from '../../../store/diagramStore';
 import type { ConnectionType, InfraNode } from '../../../types';
 import { str } from '../../../utils/misc';
 import { cn } from '../../ui/cn';
-import { EditableName, NodeHandles, Resizer } from './shared';
+import { CapabilityBadges, EditableName, NodeHandles, Resizer } from './shared';
 
 const frame = (selected?: boolean) =>
   cn('selection-ring relative h-full w-full rounded-lg', selected && 'outline-2 outline-offset-2 outline-primary/60 outline-dashed');
@@ -73,6 +73,7 @@ export const LegendNode = memo(function LegendNode({ id, data, selected }: NodeP
     return [...set].sort().join(',');
   });
   const types = usedTypes ? (usedTypes.split(',') as ConnectionType[]) : [];
+  const caps = useDiagram((s) => `${s.nodes.some((n) => n.data.props.vpn === true) ? 'v' : ''}${s.nodes.some((n) => n.data.props.fw === true) ? 'f' : ''}`);
   const showVlans = data.props.showVlans !== false && vlans.length > 0;
   const showLinks = data.props.showLinks !== false && types.length > 0;
   return (
@@ -109,6 +110,25 @@ export const LegendNode = memo(function LegendNode({ id, data, selected }: NodeP
             );
           })}
         </ul>
+      )}
+      {data.props.showLinks !== false && caps && (
+        <>
+          {(showVlans || showLinks) && <div className="my-2 h-px bg-line" />}
+          <ul className="space-y-1.5 text-[11.5px] text-fg">
+            {caps.includes('v') && (
+              <li className="flex items-center gap-2">
+                <span className="w-7"><CapabilityBadges props={{ vpn: true }} /></span>
+                Integrated VPN gateway
+              </li>
+            )}
+            {caps.includes('f') && (
+              <li className="flex items-center gap-2">
+                <span className="w-7"><CapabilityBadges props={{ fw: true }} /></span>
+                Host firewall
+              </li>
+            )}
+          </ul>
+        </>
       )}
       {!showVlans && !showLinks && <p className="text-[11px] text-subtle">Add VLANs or links to populate the legend.</p>}
     </div>

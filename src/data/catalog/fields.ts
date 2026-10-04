@@ -84,3 +84,27 @@ export const SECURITY_FIELDS: FieldDef[] = [
   F.location,
   F.description,
 ];
+
+export const IP_LIST_FIELD: FieldDef = { key: 'ips', label: 'Additional IP addresses', type: 'ipList' };
+
+const opts = (values: string[]) => values.map((v) => ({ value: v, label: v }));
+
+/** Integrated VPN gateway (routers, firewalls). */
+export const VPN_FIELDS: FieldDef[] = [
+  { key: 'vpn', label: 'Integrated VPN gateway', type: 'boolean', section: 'vpn' },
+  { key: 'vpnProtocol', label: 'Protocol', type: 'select', options: opts(['WireGuard', 'IPsec', 'OpenVPN', 'SSL VPN', 'L2TP/IPsec']), section: 'vpn', showIf: 'vpn' },
+  { key: 'vpnMode', label: 'Mode', type: 'select', options: opts(['Site-to-site', 'Remote access', 'Site-to-site + remote access']), section: 'vpn', showIf: 'vpn' },
+  { key: 'vpnEndpoint', label: 'Public endpoint', type: 'text', placeholder: 'vpn.example.com or 203.0.113.10', mono: true, section: 'vpn', showIf: 'vpn' },
+  { key: 'vpnNetwork', label: 'Tunnel network', type: 'cidr', placeholder: '10.99.0.0/24', section: 'vpn', showIf: 'vpn' },
+  { key: 'vpnPeers', label: 'Peers / notes', type: 'textarea', placeholder: 'branch-rtr-01, road warriors', section: 'vpn', showIf: 'vpn' },
+];
+
+export const HOST_FIREWALL_PRODUCTS = ['nftables', 'iptables', 'firewalld', 'ufw', 'Windows Defender Firewall', 'pf', 'Other'];
+
+/** Firewall running directly on the machine. */
+export const FIREWALL_FIELDS: FieldDef[] = [
+  { key: 'fw', label: 'Host firewall', type: 'boolean', section: 'firewall' },
+  { key: 'fwProduct', label: 'Product', type: 'select', options: opts(HOST_FIREWALL_PRODUCTS), section: 'firewall', showIf: 'fw' },
+  { key: 'fwPolicy', label: 'Inbound policy', type: 'select', options: opts(['Default deny', 'Default allow', 'Custom']), section: 'firewall', showIf: 'fw' },
+  { key: 'fwRules', label: 'Rules', type: 'textarea', placeholder: 'allow tcp/22 from 192.168.10.0/24\nallow tcp/443 from any', mono: true, section: 'firewall', showIf: 'fw' },
+];

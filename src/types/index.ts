@@ -73,6 +73,7 @@ export type FieldType =
   | 'vlanList'
   | 'os'
   | 'ports'
+  | 'ipList'
   | 'color'
   | 'boolean';
 
@@ -91,6 +92,21 @@ export interface FieldDef {
   advanced?: boolean;
   help?: string;
   mono?: boolean;
+  /** Fields of an integrated service are grouped in their own panel section. */
+  section?: Capability;
+  /** Only shown when this boolean prop is enabled. */
+  showIf?: string;
+}
+
+/** Services a device can run in addition to its main role. */
+export type Capability = 'vpn' | 'firewall';
+
+/** Additional address of a multi-homed node (props.ips). */
+export interface IpEntry {
+  address: string;
+  /** Interface or purpose, e.g. "eth1", "mgmt", "backup". */
+  label?: string;
+  vlan?: string;
 }
 
 export interface ComponentDefinition {
@@ -118,6 +134,8 @@ export interface ComponentDefinition {
   portPattern?: (index: number) => string;
   /** Does not need a network connection (skips validation). */
   standalone?: boolean;
+  /** Integrated services that can be enabled on this equipment. */
+  capabilities?: Capability[];
 }
 
 /** Item of the component library (a definition plus preset values). */
