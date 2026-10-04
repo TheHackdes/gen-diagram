@@ -91,3 +91,32 @@ describe('containment rules', () => {
     expect(canContain('vlan-zone', 'proxmox')).toBe(true);
   });
 });
+
+describe('every address is checked alike', () => {
+  const V99: Vlan = { ...VLAN, uid: 'w', id: 99, name: 'Mgmt', subnet: '192.168.99.0/24', gateway: '192.168.99.1' };
+  it('a second address in the wrong subnet or on a broadcast address is reported', () => {
+    const n = node('server', 'm', { ip: '192.168.20.10', vlan: '20', ips: [{ address: '192.168.99.255', vlan: '99' }, { address: '10.0.0.1', vlan: '20' }] });
+    const r = messages([n], [], [VLAN, V99]);
+    expect(r.some((m) => /192\.168\.99\.255 is the broadcast address/.test(m))).toBe(true);
+    expect(r.some((m) => /10\.0\.0\.1 is outside VLAN 20/.test(m))).toBe(true);
+  });
+  it('the gateway may be on any of the networks of a multi-homed host', () => {
+    const n = node('server', 'g', { ip: '192.168.20.10', vlan: '20', gateway: '192.168.99.1', ips: [{ address: '192.168.99.10', vlan: '99' }] });
+    expect(messages([n], [], [VLAN, V99]).some((m) => /gateway/.test(m))).toBe(false);
+    const bad = node('server', 'g2', { ip: '192.168.20.11', vlan: '20', gateway: '10.9.9.1' });
+    expect(messages([bad], [], [VLAN]).some((m) => /gateway 10\.9\.9\.1 is not on any/.test(m))).toBe(true);
+  });
+});
+
+describe('multi-VLAN devices', () => {
+  const V30: Vlan = { ...VLAN, uid: 'x', id: 30, name: 'Users', subnet: '192.168.30.0/24', gateway: '192.168.30.1' };
+  it('a DHCP server serves every VLAN where it has an address', () => {
+    const r1 = node('router', 'r1', { ip: '192.168.20.1', vlan: '20', services: ['dhcp'], ips: [{ address: '192.168.30.1', vlan: '30' }] });
+    const r2 = node('server', 'd2', { ip: '192.168.30.5', vlan: '30', services: ['dhcp'] });
+    expect(messages([r1, r2], [], [VLAN, V30]).some((m) => /VLAN 30 has 2 DHCP servers/.test(m))).toBe(true);
+  });
+  it('trunks may only carry defined VLANs', () => {
+    const edges = [edge('t', 'sA', 'sB', { mode: 'trunk', vlan: '20,77' })];
+    expect(messages([node('switch', 'sA'), node('switch', 'sB')], edges, [VLAN]).some((m) => /undefined VLAN 77/.test(m))).toBe(true);
+  });
+});

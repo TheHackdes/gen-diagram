@@ -1,7 +1,7 @@
 import { getDefinition } from '../../data/catalog';
 import type { ConnectionType, InfraEdge, InfraEdgeData, InfraNode, NodeRole } from '../../types';
 import { str } from '../../utils/misc';
-import { hasVpn, hasWifi } from '../nodes/ips';
+import { addressEntries, hasVpn, hasWifi } from '../nodes/ips';
 
 const SWITCHING: NodeRole[] = ['switch', 'core-switch'];
 const INFRA_TRUNK: NodeRole[] = ['switch', 'core-switch', 'router', 'firewall', 'hypervisor', 'ap', 'bridge'];
@@ -129,9 +129,23 @@ export function suggestConnection(
     data.mode = 'trunk';
   } else if (SWITCHING.includes(rs) || SWITCHING.includes(rt)) {
     const endpoint = SWITCHING.includes(rs) ? target : source;
-    const vlan = str(endpoint.data.props.vlan);
-    data.mode = 'access';
-    if (vlan) data.vlan = vlan;
+    const port = endpoint === source ? data.sourcePort : data.targetPort;
+    const entries = addressEntries(endpoint.data.props);
+    // The address configured on the interface used by this link decides the access VLAN.
+    const onPort = entries.find((e) => e.label && e.label === port && e.vlan);
+    const vlans = [...new Set(entries.map((e) => e.vlan ?? '').filter(Boolean))];
+    if (onPort) {
+      data.mode = 'access';
+      data.vlan = onPort.vlan;
+    } else if (vlans.length > 1) {
+      // Several networks on one link: tagged (trunk) with all of them.
+      data.mode = 'trunk';
+      data.vlan = vlans.sort((x, y) => Number(x) - Number(y)).join(',');
+    } else {
+      data.mode = 'access';
+      const vlan = vlans[0] ?? str(endpoint.data.props.vlan);
+      if (vlan) data.vlan = vlan;
+    }
   }
   return data;
 }

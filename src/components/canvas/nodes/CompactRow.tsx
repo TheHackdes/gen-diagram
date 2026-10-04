@@ -1,13 +1,13 @@
 import { Lock } from 'lucide-react';
 import { colorOf, getDefinition } from '../../../data/catalog';
-import { extraIps } from '../../../features/nodes/ips';
+import { shownAddresses } from '../../../features/nodes/ips';
 import { useDiagram } from '../../../store/diagramStore';
 import { compactFieldsOf, compactHostAbove, type CompactField } from '../../../features/nodes/compact';
 import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
 import { Icon } from '../../icons/Icon';
 import { cn } from '../../ui/cn';
-import { CapabilityBadges, EditableName, NodeHandles, OsChip, useVlan, VlanChip } from './shared';
+import { CapabilityBadges, EditableName, NodeHandles, OsChip, VlanChips } from './shared';
 
 /** Is a node (through its parents) inside a host shown in compact view? */
 export function useInCompactHost(parentId: string | undefined): boolean {
@@ -45,10 +45,8 @@ function resources(props: Record<string, unknown>): string {
 export function CompactRow({ id, data, selected, parentId }: { id: string; data: InfraNode['data']; selected?: boolean; parentId?: string }) {
   const def = getDefinition(data.type);
   const color = data.color ?? colorOf(def);
-  const vlan = useVlan(data.props.vlan);
   const show = useCompactFields(parentId);
-  const ip = str(data.props.ip);
-  const more = extraIps(data.props).length;
+  const addresses = shownAddresses(data.props).map((a) => a.address).join(' · ');
   const docker = def.role === 'docker-container';
   const image = str(data.props.image);
   const tag = str(data.props.tag);
@@ -65,7 +63,7 @@ export function CompactRow({ id, data, selected, parentId }: { id: string; data:
         def.role === 'lxc' && !selected && 'border-dashed',
       )}
       style={{ borderLeft: `3px solid ${color}` }}
-      title={[data.name, ip, description].filter(Boolean).join(' · ')}
+      title={[data.name, addresses, description].filter(Boolean).join(' · ')}
     >
       <NodeHandles nodeId={id} />
       <span style={{ color }} className="shrink-0">
@@ -77,8 +75,7 @@ export function CompactRow({ id, data, selected, parentId }: { id: string; data:
           {badge}
         </span>
       )}
-      {show.has('ip') && ip && <span className="shrink-0 font-mono text-[10.5px] text-muted">{ip}</span>}
-      {show.has('moreIps') && more > 0 && <span className="shrink-0 text-[9.5px] text-subtle" title={extraIps(data.props).map((e) => e.address).join(', ')}>+{more} IP</span>}
+      {show.has('ip') && addresses && <span className="min-w-0 shrink truncate font-mono text-[10.5px] text-muted">{addresses}</span>}
       {show.has('hostname') && hostname && <span className="min-w-0 shrink truncate font-mono text-[10px] text-subtle">{hostname}</span>}
       {show.has('resources') && res && <span className="shrink-0 text-[10px] text-muted">{res}</span>}
       <span className="min-w-0 flex-1 truncate text-[10.5px] text-subtle">{show.has('description') ? description : ''}</span>
@@ -90,7 +87,7 @@ export function CompactRow({ id, data, selected, parentId }: { id: string; data:
             <OsChip osId={data.props.os} version={data.props.osVersion} />
           ))}
         {show.has('ports') && ports && <span className="shrink-0 rounded bg-surface-2 px-1 font-mono text-[9.5px] text-muted">{ports}</span>}
-        {show.has('vlan') && <VlanChip vlan={vlan} raw={docker ? '' : str(data.props.vlan)} />}
+        {show.has('vlan') && !docker && <VlanChips props={data.props} max={2} />}
         {show.has('services') && <CapabilityBadges props={data.props} max={2} />}
       </span>
       {data.locked && <Lock size={10} className="shrink-0 text-subtle" />}

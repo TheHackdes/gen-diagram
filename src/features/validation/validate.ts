@@ -3,12 +3,15 @@ import type { Bond, InfraEdge, InfraNode, NodeRole, ValidationIssue, Vlan } from
 import { analyzeBond } from '../connections/bonds';
 import { cidrEquals, cidrOverlaps, ipInCidr, isValidCidr, isValidIPv4, isValidMac, parseCidr, parseIPv4 } from '../../utils/ip';
 import { str } from '../../utils/misc';
-import { extraIps, hasHostFirewall, hasVpn, hasWifi } from '../nodes/ips';
+import { addressEntries, allIps, hasHostFirewall, hasVpn, hasWifi } from '../nodes/ips';
 import { servicesOf } from '../../data/services';
 import { addressProblem, hasRules, isValidPorts, rulesOf } from '../firewall/rules';
 
 /** Devices that forward Ethernet frames between their ports (can loop). */
 const L2_ROLES = new Set<NodeRole>(['switch', 'core-switch', 'ap', 'bridge', 'hypervisor']);
+
+/** Devices whose firewall sees forwarded traffic (routing, bridging guests or containers). */
+const FORWARDING_ROLES = new Set<NodeRole>(['router', 'firewall', 'core-switch', 'vpn', 'hypervisor', 'docker-host', 'load-balancer', 'security']);
 
 const ZONE_TYPES = new Set(['vlan-zone', 'subnet', 'network-zone', 'dmz', 'docker-network']);
 
@@ -51,9 +54,12 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
   // --- Formats --------------------------------------------------------
   for (const n of nodes) {
     const def = getDefinition(n.data.type);
+    const hasAddresses = definitionHasField(def, 'ip');
     for (const f of def.fields) {
       const value = n.data.props[f.key];
       if (value === undefined || value === '') continue;
+      // Addresses and their VLANs are checked together in the address section.
+      if (hasAddresses && (f.key === 'ip' || f.key === 'vlan')) continue;
       if (f.type === 'ip' && !isValidIPv4(value))
         push({ severity: 'error', message: `${n.data.name}: "${str(value)}" is not a valid IPv4 address (${f.label})`, nodeIds: [n.id] });
       if (f.type === 'cidr' && !isValidCidr(value))
@@ -65,25 +71,10 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
     }
   }
 
-  // --- Additional addresses ------------------------------------------
-  for (const n of nodes) {
-    for (const e of extraIps(n.data.props)) {
-      if (!e.address) continue;
-      if (!isValidIPv4(e.address)) {
-        push({ severity: 'error', message: `${n.data.name}: "${e.address}" is not a valid IPv4 address (additional IP)`, nodeIds: [n.id] });
-        continue;
-      }
-      const vlan = e.vlan ? vlanById.get(e.vlan) : undefined;
-      if (e.vlan && !vlan) push({ severity: 'warning', message: `${n.data.name}: ${e.address} references VLAN ${e.vlan} which is not defined`, nodeIds: [n.id] });
-      if (vlan?.subnet && ipInCidr(e.address, vlan.subnet) === false)
-        push({ severity: 'warning', message: `${n.data.name}: ${e.address} is outside VLAN ${vlan.id} subnet ${vlan.subnet}`, nodeIds: [n.id] });
-    }
-  }
-
   // --- Duplicate IPs --------------------------------------------------
   const ipOwners = new Map<string, InfraNode[]>();
   for (const n of nodes) {
-    const addresses = [...['ip', 'publicIp', 'vip'].map((k) => str(n.data.props[k]).trim()), ...extraIps(n.data.props).map((e) => e.address.trim())];
+    const addresses = [...['publicIp', 'vip'].map((k) => str(n.data.props[k]).trim()), ...allIps(n.data.props).map((e) => e.address.trim())];
     for (const ip of new Set(addresses)) {
       if (!isValidIPv4(ip)) continue;
       ipOwners.set(ip, [...(ipOwners.get(ip) ?? []), n]);
@@ -99,33 +90,43 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
       });
   }
 
-  // --- IP vs subnet ----------------------------------------------------
+  // --- Addresses: every address of a node is checked the same way ------
   for (const n of nodes) {
-    const ip = str(n.data.props.ip);
-    if (!isValidIPv4(ip)) continue;
-    const vlan = vlanById.get(str(n.data.props.vlan));
-    if (vlan?.subnet && ipInCidr(ip, vlan.subnet) === false)
-      push({ severity: 'warning', message: `${n.data.name}: ${ip} is outside VLAN ${vlan.id} subnet ${vlan.subnet}`, nodeIds: [n.id] });
+    const entries = addressEntries(n.data.props).filter((e) => e.address);
+    const valid: { address: string; subnet?: string }[] = [];
+    for (const e of entries) {
+      if (!isValidIPv4(e.address)) {
+        push({ severity: 'error', message: `${n.data.name}: "${e.address}" is not a valid IPv4 address`, nodeIds: [n.id] });
+        continue;
+      }
+      const vlan = e.vlan ? vlanById.get(e.vlan) : undefined;
+      if (e.vlan && !vlan) push({ severity: 'warning', message: `${n.data.name}: ${e.address} references VLAN ${e.vlan} which is not defined`, nodeIds: [n.id] });
+      if (vlan?.subnet && ipInCidr(e.address, vlan.subnet) === false)
+        push({ severity: 'warning', message: `${n.data.name}: ${e.address} is outside VLAN ${vlan.id} subnet ${vlan.subnet}`, nodeIds: [n.id] });
+      const c = parseCidr(vlan?.subnet);
+      const a = parseIPv4(e.address);
+      if (c && a !== null && c.prefix < 31 && ipInCidr(e.address, vlan!.subnet) === true) {
+        if (a === c.network) push({ severity: 'error', message: `${n.data.name}: ${e.address} is the network address of ${vlan!.subnet}`, nodeIds: [n.id] });
+        if (a === (c.network | (~c.mask >>> 0)) >>> 0) push({ severity: 'error', message: `${n.data.name}: ${e.address} is the broadcast address of ${vlan!.subnet}`, nodeIds: [n.id] });
+      }
+      valid.push({ address: e.address, subnet: vlan?.subnet });
+    }
+    if (!valid.length) continue;
+    // A multi-homed device only needs one address in a given network.
+    const anyIn = (subnet: string) => valid.some((v) => ipInCidr(v.address, subnet) === true);
+    const list = valid.map((v) => v.address).join(', ');
     const net = str(n.data.props.network);
-    if (net && ipInCidr(ip, net) === false)
-      push({ severity: 'warning', message: `${n.data.name}: ${ip} is outside its network ${net}`, nodeIds: [n.id] });
+    if (isValidCidr(net) && !anyIn(net)) push({ severity: 'warning', message: `${n.data.name}: no address (${list}) in its network ${net}`, nodeIds: [n.id] });
     const zone = enclosingZone(n, byId);
-    if (zone) {
-      const subnet = zoneSubnet(zone, vlans);
-      if (subnet && ipInCidr(ip, subnet) === false && !(vlan?.subnet && ipInCidr(ip, vlan.subnet)))
-        push({ severity: 'warning', message: `${n.data.name}: ${ip} is outside ${zone.data.name} (${subnet})`, nodeIds: [n.id, zone.id] });
-    }
-    for (const subnet of [vlan?.subnet, net].filter(Boolean) as string[]) {
-      const c = parseCidr(subnet);
-      const a = parseIPv4(ip);
-      if (!c || a === null || c.prefix >= 31 || ipInCidr(ip, subnet) !== true) continue;
-      if (a === c.network) push({ severity: 'error', message: `${n.data.name}: ${ip} is the network address of ${subnet}`, nodeIds: [n.id] });
-      if (a === (c.network | (~c.mask >>> 0)) >>> 0) push({ severity: 'error', message: `${n.data.name}: ${ip} is the broadcast address of ${subnet}`, nodeIds: [n.id] });
-    }
+    const zoneNet = zone ? zoneSubnet(zone, vlans) : '';
+    // Equipment can sit in a zone with an address of its own VLAN (e.g. an AP managed in VLAN 99).
+    const explained = valid.some((v) => v.subnet && ipInCidr(v.address, v.subnet) === true);
+    if (zone && isValidCidr(zoneNet) && !anyIn(zoneNet) && !explained)
+      push({ severity: 'warning', message: `${n.data.name}: no address (${list}) in ${zone.data.name} (${zoneNet})`, nodeIds: [n.id, zone.id] });
     const gw = str(n.data.props.gateway);
-    const subnetForGw = net || vlan?.subnet;
-    if (gw && subnetForGw && ipInCidr(gw, subnetForGw) === false)
-      push({ severity: 'warning', message: `${n.data.name}: gateway ${gw} is not in ${subnetForGw}`, nodeIds: [n.id] });
+    const reachable = [net, ...valid.map((v) => v.subnet ?? '')].filter(isValidCidr);
+    if (isValidIPv4(gw) && reachable.length && !reachable.some((sn) => ipInCidr(gw, sn) === true))
+      push({ severity: 'warning', message: `${n.data.name}: gateway ${gw} is not on any of its networks (${reachable.join(', ')})`, nodeIds: [n.id] });
   }
 
   // --- Servers without gateway (when the VLAN does not define one) -----
@@ -133,8 +134,9 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
     const def = getDefinition(n.data.type);
     if (def.role !== 'server' || !definitionHasField(def, 'gateway')) continue;
     if (!str(n.data.props.ip) || str(n.data.props.gateway)) continue;
-    const vlan = vlanById.get(str(n.data.props.vlan));
-    if (!vlan?.gateway) push({ severity: 'info', message: `${n.data.name} has no gateway`, nodeIds: [n.id] });
+    // Any of its VLANs may provide the gateway.
+    const viaVlan = addressEntries(n.data.props).some((e) => vlanById.get(e.vlan ?? '')?.gateway);
+    if (!viaVlan) push({ severity: 'info', message: `${n.data.name} has no gateway`, nodeIds: [n.id] });
   }
 
   // --- VLAN definitions ------------------------------------------------
@@ -205,7 +207,8 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
         });
     }
     const vlan = e.data?.vlan;
-    if (vlan && e.data?.mode !== 'trunk') {
+    // Access and trunk links alike must only carry defined VLANs.
+    if (vlan) {
       for (const id of vlan.split(/[\s,]+/).filter(Boolean)) {
         if (!vlanById.has(id)) push({ severity: 'warning', message: `Link ${s.data.name} ↔ ${t.data.name} uses undefined VLAN ${id}`, edgeIds: [e.id] });
       }
@@ -300,8 +303,11 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
   const dhcpByVlan = new Map<string, InfraNode[]>();
   for (const n of nodes) {
     const isDhcp = n.data.type === 'dhcp-server' || servicesOf(n.data.props).includes('dhcp');
-    const vlan = str(n.data.props.vlan);
-    if (isDhcp && vlan) dhcpByVlan.set(vlan, [...(dhcpByVlan.get(vlan) ?? []), n]);
+    if (!isDhcp) continue;
+    // A DHCP server answers on every VLAN where it has an address.
+    const served = new Set(addressEntries(n.data.props).map((e) => e.vlan ?? '').filter(Boolean));
+    if (!served.size && str(n.data.props.vlan)) served.add(str(n.data.props.vlan));
+    for (const vlan of served) dhcpByVlan.set(vlan, [...(dhcpByVlan.get(vlan) ?? []), n]);
   }
   for (const [vlan, servers] of dhcpByVlan)
     if (servers.length > 1)
@@ -325,6 +331,9 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
         push({ severity: 'error', message: `${where}: invalid ports "${r.ports}"`, nodeIds: [n.id] });
     });
     const rules = rulesOf(n.data.props).filter((r) => r.enabled);
+    // Forwarded traffic only exists on devices that route or bridge it.
+    if (rules.some((r) => r.direction === 'forward') && !FORWARDING_ROLES.has(getDefinition(n.data.type).role))
+      push({ severity: 'info', message: `${n.data.name}: “Forward” rules only apply to devices that route or bridge traffic`, nodeIds: [n.id] });
     const catchAll = rules.findIndex((r) => r.source.trim() === 'any' && r.destination.trim() === 'any' && r.protocol === 'any' && r.direction !== 'out');
     if (catchAll >= 0 && catchAll < rules.length - 1)
       push({ severity: 'warning', message: `${n.data.name}: rule #${catchAll + 1} matches everything — the rules after it are never used`, nodeIds: [n.id] });

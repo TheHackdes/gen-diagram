@@ -8,8 +8,9 @@ export function useRules(node: InfraNode) {
   const update = useDiagram((s) => s.updateNodeProps);
   const rules = rulesOf(node.data.props);
   const write = (next: FirewallRule[]) => update(node.id, { fwRules: next });
-  // A host firewall protects the host itself: new rules target it by default.
-  const defaultDestination = node.data.props.fw === true ? (allIps(node.data.props)[0]?.address ?? 'any') : 'any';
+  // A host firewall protects the host itself: its single address, or all of them ("any").
+  const own = allIps(node.data.props).filter((e) => e.address);
+  const defaultDestination = node.data.props.fw === true && own.length === 1 ? own[0].address : 'any';
   return {
     rules,
     add: (partial: Partial<FirewallRule> = {}): FirewallRule => {

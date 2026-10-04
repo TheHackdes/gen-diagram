@@ -74,7 +74,6 @@ export type FieldType =
   | 'vlanList'
   | 'os'
   | 'ports'
-  | 'ipList'
   | 'nodeRef'
   | 'color'
   | 'boolean';

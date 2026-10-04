@@ -1,4 +1,5 @@
 import { ArrowDown, ArrowUp, Plus, Trash } from 'lucide-react';
+import { useEffect } from 'react';
 import { RULE_PRESETS } from '../../features/firewall/rules';
 import { useDiagram } from '../../store/diagramStore';
 import { useUi } from '../../store/uiStore';
@@ -130,6 +131,10 @@ export function RulesEditorDialog() {
   const nodeId = useUi((s) => s.rulesFor);
   const node = useDiagram((s) => (nodeId ? s.nodes.find((n) => n.id === nodeId) : undefined));
   const close = () => useUi.getState().openRules(null);
+  // The device was deleted: forget it so that an undo does not reopen the editor.
+  useEffect(() => {
+    if (nodeId && !node) useUi.getState().openRules(null);
+  }, [nodeId, node]);
   return (
     <Dialog
       open={!!node}

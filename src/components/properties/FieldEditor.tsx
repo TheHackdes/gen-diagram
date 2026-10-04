@@ -1,4 +1,5 @@
 import { ArrowRight, Plus, Sparkles, X } from 'lucide-react';
+import { definitionHasField, getDefinition } from '../../data/catalog';
 import { useDiagram } from '../../store/diagramStore';
 import type { FieldDef, InfraNode } from '../../types';
 import { isValidCidr, isValidIPv4, isValidMac } from '../../utils/ip';
@@ -116,12 +117,10 @@ export function FieldEditor({ node, field }: { node: InfraNode; field: FieldDef 
 
   if (field.type === 'os') return <OsPicker nodeId={node.id} osId={node.data.props.os} version={node.data.props.osVersion} />;
 
-  if (field.type === 'ipList')
-    return (
-      <FieldRow label={field.label}>
-        <IpListEditor node={node} />
-      </FieldRow>
-    );
+  // Main address and additional ones are edited together in one list.
+  if (field.key === 'ip' && field.type === 'ip') return <IpListEditor node={node} field={field} />;
+  // Each address carries its VLAN: the separate VLAN field would duplicate the first one.
+  if (field.key === 'vlan' && definitionHasField(getDefinition(node.data.type), 'ip')) return null;
 
   if (field.type === 'nodeRef')
     return (

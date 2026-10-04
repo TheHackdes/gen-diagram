@@ -2,7 +2,7 @@ import type { Capability, ComponentDefinition, FieldDef, LibraryPreset, NodeRole
 import { CATEGORY_BY_ID } from '../categories';
 import { getAllOperatingSystems } from '../operatingSystems';
 import { ANNOTATIONS } from './annotations';
-import { FIREWALL_FIELDS, IP_LIST_FIELD, REDUNDANCY_GROUP_FIELD, VPN_FIELDS, WIFI_FIELDS } from './fields';
+import { FIREWALL_FIELDS, REDUNDANCY_GROUP_FIELD, VPN_FIELDS, WIFI_FIELDS } from './fields';
 import { GENERIC, LOGICAL } from './logicalGeneric';
 import { NETWORK_DEVICES } from './networkDevices';
 import { SERVERS } from './servers';
@@ -51,7 +51,8 @@ const CAPABILITY_FIELDS: Record<Capability, FieldDef[]> = { vpn: VPN_FIELDS, fir
 function enrich(def: ComponentDefinition): ComponentDefinition {
   const ipIndex = def.fields.findIndex((f) => f.key === 'ip');
   if (ipIndex < 0) return def;
-  const fields = [...def.fields.slice(0, ipIndex + 1), IP_LIST_FIELD, ...def.fields.slice(ipIndex + 1)];
+  // The ip field edits the whole address list (see IpListEditor).
+  const fields = def.fields.slice();
   if (REDUNDANT_ROLES.has(def.role)) {
     const vlanIndex = fields.findIndex((f) => f.key === 'vlan');
     fields.splice(vlanIndex >= 0 ? vlanIndex + 1 : fields.length, 0, REDUNDANCY_GROUP_FIELD);

@@ -6,10 +6,10 @@ import { useDiagram } from '../../../store/diagramStore';
 import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
 import { cn } from '../../ui/cn';
-import { COMPACT_HEADER, extraIps, headerHeight, shownExtraIps } from '../../../features/nodes/ips';
+import { COMPACT_HEADER, headerHeight, hiddenAddressCount, shownAddresses } from '../../../features/nodes/ips';
 import { Icon } from '../../icons/Icon';
 import { useCompactFields, useInCompactHost } from './CompactRow';
-import { CapabilityBadges, DetailLines, EditableName, ExtraIpLines, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChip } from './shared';
+import { AddressLines, CapabilityBadges, DetailLines, EditableName, IconTile, NodeHandles, OsChip, Resizer, VlanChips } from './shared';
 
 const RUNS_ON: Record<string, string> = { vm: 'VM', physical: 'Bare metal', lxc: 'LXC' };
 
@@ -20,14 +20,15 @@ function ContainerNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode
   const setCompact = useDiagram((s) => s.setCompact);
   const def = getDefinition(data.type);
   const color = data.color ?? colorOf(def);
-  const vlan = useVlan(data.props.vlan);
   const childCount = useDiagram((s) => s.nodes.reduce((acc, n) => acc + (n.parentId === id ? 1 : 0), 0));
-  const ip = str(data.props.ip);
+  const addresses = shownAddresses(data.props);
+  const joined = addresses.map((a) => a.address).join(' · ');
+  const hiddenCount = hiddenAddressCount(data.props);
   const version = str(data.props.version);
   const isDocker = def.role === 'docker-host';
   const header = headerHeight({ data } as InfraNode);
   const compact = data.props.compact === true;
-  const meta = [isDocker ? null : `${def.label}${version ? ` ${version}` : ''}`, ip].filter(Boolean).join(' · ');
+  const meta = isDocker ? '' : `${def.label}${version ? ` ${version}` : ''}`;
 
   const countLabel = `${childCount} ${isDocker ? (childCount === 1 ? 'container' : 'containers') : childCount === 1 ? 'guest' : 'guests'}`;
 
@@ -49,10 +50,10 @@ function ContainerNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode
               {RUNS_ON[str(data.props.runsOn)] ?? ''}
             </span>
           )}
-          {show.has('ip') && ip && <span className="shrink-0 font-mono text-[10.5px] text-muted">{ip}</span>}
+          {show.has('ip') && joined && <span className="min-w-0 truncate font-mono text-[10.5px] text-muted">{joined}</span>}
           <span className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
             {show.has('os') && <OsChip osId={data.props.os} version={data.props.osVersion} />}
-            {show.has('vlan') && <VlanChip vlan={vlan} raw={str(data.props.vlan)} />}
+            {show.has('vlan') && <VlanChips props={data.props} />}
             {show.has('services') && <CapabilityBadges props={data.props} max={2} />}
             <span className="shrink-0 text-[10px] font-medium text-muted">{countLabel}</span>
           </span>
@@ -91,19 +92,19 @@ function ContainerNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode
           </div>
           <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-muted">
             <span className="truncate">{meta || def.label}</span>
-            {extraIps(data.props).length > shownExtraIps(data.props).length && (
-              <span className="shrink-0 rounded bg-surface-2 px-1 text-[9.5px]" title={extraIps(data.props).filter((e) => e.show === false).map((e) => `${e.address}${e.label ? ` (${e.label})` : ''}`).join('\n')}>
-                +{extraIps(data.props).length - shownExtraIps(data.props).length} hidden
+            {hiddenCount > 0 && (
+              <span className="shrink-0 rounded bg-surface-2 px-1 text-[9.5px]" title="Hidden addresses — listed in the properties panel">
+                +{hiddenCount} hidden
               </span>
             )}
           </span>
-          <ExtraIpLines props={data.props} />
+          <AddressLines props={data.props} />
           <DetailLines props={data.props} />
         </div>
         <div className="flex shrink-0 items-center gap-1 pt-1.5">
           <CapabilityBadges props={data.props} max={5} />
           <OsChip osId={data.props.os} version={data.props.osVersion} />
-          <VlanChip vlan={vlan} raw={str(data.props.vlan)} />
+          <VlanChips props={data.props} />
           <span
             className="rounded-full px-1.5 py-px text-[10px] font-semibold"
             style={{ background: alpha(color, 0.12), color }}

@@ -1,79 +1,112 @@
-import { Eye, EyeOff, Plus, X } from 'lucide-react';
-import { extraIps } from '../../features/nodes/ips';
+import { Eye, EyeOff, Plus, Sparkles, X } from 'lucide-react';
+import { addressEntries, allIps, defaultInterface, entriesPatch } from '../../features/nodes/ips';
 import { suggestIp } from '../../features/nodes/operations';
 import { useDiagram } from '../../store/diagramStore';
-import type { InfraNode, IpEntry } from '../../types';
+import type { FieldDef, InfraNode, IpEntry } from '../../types';
 import { ipInCidr, isValidIPv4 } from '../../utils/ip';
-import { str } from '../../utils/misc';
-import { Input, Select } from '../ui/Field';
+import { FieldRow, Input, Select } from '../ui/Field';
 
-/** Additional addresses of a multi-homed node (management, backup, storage networks…). */
-export function IpListEditor({ node }: { node: InfraNode }) {
+/**
+ * The addresses of a node, all alike: address, interface and VLAN on each
+ * line. "Add IP address" proposes an interface, a VLAN and a free address.
+ */
+export function IpListEditor({ node, field }: { node: InfraNode; field: FieldDef }) {
   const update = useDiagram((s) => s.updateNodeProps);
   const vlans = useDiagram((s) => s.vlans);
   const nodes = useDiagram((s) => s.nodes);
-  const rows = extraIps(node.data.props);
-  const write = (next: IpEntry[]) => update(node.id, { ips: next });
+  const entries = addressEntries(node.data.props);
+  const write = (next: IpEntry[]) => update(node.id, entriesPatch(next));
+  const subnetOf = (vlan: string | undefined) => vlans.find((v) => String(v.id) === vlan)?.subnet;
 
-  const addRow = () => {
-    // Suggest an address on a VLAN not used yet by this node.
-    const used = new Set([str(node.data.props.vlan), ...rows.map((r) => r.vlan ?? '')]);
+  const add = () => {
+    // Propose a VLAN this node has no address in yet, with a free address in it.
+    const used = new Set(entries.map((e) => e.vlan ?? ''));
     const vlan = vlans.find((v) => !used.has(String(v.id)) && v.subnet);
-    write([...rows, { address: vlan?.subnet ? suggestIp(vlan.subnet, nodes) : '', label: `eth${rows.length + 1}`, vlan: vlan ? String(vlan.id) : '', show: true }]);
+    const vlanId = vlan ? String(vlan.id) : '';
+    const address = vlan?.subnet ? suggestIp(vlan.subnet, nodes) : '';
+    write([...entries, { address, label: defaultInterface(node, entries.length, vlanId), vlan: vlanId, show: true }]);
+    setTimeout(() => document.getElementById(`ip-${node.id}-${entries.length}`)?.focus(), 30);
   };
 
   return (
-    <div className="space-y-1.5">
-      {rows.map((r, i) => {
-        const vlan = vlans.find((v) => String(v.id) === r.vlan);
-        const invalid = !!r.address && !isValidIPv4(r.address);
-        const outside = !invalid && !!vlan?.subnet && !!r.address && ipInCidr(r.address, vlan.subnet) === false;
-        const set = (patch: Partial<IpEntry>) => write(rows.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-        return (
-          <div key={i} className="rounded-lg border border-line p-1.5">
-            <div className="flex items-center gap-1.5">
-              <Input
-                aria-label={`Additional IP ${i + 1}`}
-                mono
-                invalid={invalid}
-                placeholder="10.0.99.10"
-                value={r.address}
-                onChange={(e) => set({ address: e.target.value })}
-              />
-              <button
-                type="button"
-                aria-label={r.show !== false ? 'Hide on diagram' : 'Show on diagram'}
-                aria-pressed={r.show !== false}
-                title={r.show !== false ? 'Shown on the diagram — click to hide' : 'Hidden on the diagram — click to show'}
-                onClick={() => set({ show: r.show === false })}
-                className={r.show !== false ? 'rounded p-1 text-primary' : 'rounded p-1 text-subtle hover:text-fg'}
-              >
-                {r.show !== false ? <Eye size={13} /> : <EyeOff size={13} />}
-              </button>
-              <button type="button" aria-label="Remove address" onClick={() => write(rows.filter((_, j) => j !== i))} className="rounded p-1 text-subtle hover:text-danger">
-                <X size={13} />
-              </button>
+    <FieldRow label="IP addresses">
+      <div className="space-y-1.5">
+        {entries.map((r, i) => {
+          const subnet = subnetOf(r.vlan);
+          const invalid = !!r.address && !isValidIPv4(r.address);
+          const outside = !invalid && !!subnet && !!r.address && ipInCidr(r.address, subnet) === false;
+          const suggestion = !r.address && subnet ? suggestIp(subnet, nodes) : '';
+          const dupOwner = r.address && isValidIPv4(r.address)
+            ? nodes.find((n) => n.id !== node.id && allIps(n.data.props).some((e) => e.address === r.address))
+            : undefined;
+          const dupSelf = !!r.address && entries.some((e, j) => j !== i && e.address === r.address);
+          const set = (patch: Partial<IpEntry>) => write(entries.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+          const shown = r.show !== false;
+          return (
+            <div key={i} className="rounded-lg border border-line p-1.5">
+              <div className="flex items-center gap-1">
+                <Input
+                  id={`ip-${node.id}-${i}`}
+                  aria-label={`IP address ${i + 1}`}
+                  mono
+                  invalid={invalid}
+                  placeholder={suggestion || field.placeholder || '192.168.10.20'}
+                  value={r.address}
+                  onChange={(e) => set({ address: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Tab' && !e.shiftKey && !r.address && suggestion) set({ address: suggestion });
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label={shown ? 'Hide on diagram' : 'Show on diagram'}
+                  aria-pressed={shown}
+                  title={shown ? 'Shown on the diagram — click to hide' : 'Hidden on the diagram — click to show'}
+                  onClick={() => set({ show: !shown })}
+                  className={shown ? 'rounded p-1 text-primary' : 'rounded p-1 text-subtle hover:text-fg'}
+                >
+                  {shown ? <Eye size={13} /> : <EyeOff size={13} />}
+                </button>
+                <button type="button" aria-label="Remove address" onClick={() => write(entries.filter((_, j) => j !== i))} className="rounded p-1 text-subtle hover:text-danger">
+                  <X size={13} />
+                </button>
+              </div>
+              <div className="mt-1.5 grid grid-cols-[1fr_1.3fr] gap-1.5">
+                <Input aria-label="Interface" mono placeholder={defaultInterface(node, i, r.vlan ?? '')} value={r.label ?? ''} onChange={(e) => set({ label: e.target.value })} className="h-7 text-[12px]" />
+                <Select
+                  aria-label="VLAN"
+                  value={r.vlan ?? ''}
+                  onChange={(e) => {
+                    const vlan = e.target.value;
+                    const next = subnetOf(vlan);
+                    // An empty address, or one from another subnet, follows the new VLAN.
+                    const keep = !!r.address && (!next || ipInCidr(r.address, next) !== false);
+                    set({ vlan, address: keep ? r.address : next ? suggestIp(next, nodes) : r.address });
+                  }}
+                  className="h-7 text-[12px]"
+                >
+                  <option value="">No VLAN</option>
+                  {vlans.map((v) => (
+                    <option key={v.uid} value={String(v.id)}>
+                      VLAN {v.id} — {v.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              {suggestion && (
+                <button type="button" onClick={() => set({ address: suggestion })} className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline">
+                  <Sparkles size={11} /> Use {suggestion}
+                </button>
+              )}
+              {(invalid || outside) && <p className="mt-1 text-[11px] text-danger">{invalid ? 'Invalid IPv4 address' : `Outside VLAN ${r.vlan} (${subnet})`}</p>}
+              {(dupOwner || dupSelf) && <p className="mt-1 text-[11px] text-danger">Already used {dupSelf ? 'by another line' : `by ${dupOwner!.data.name}`}</p>}
             </div>
-            <div className="mt-1.5 grid grid-cols-[1fr_1.3fr] gap-1.5 pr-12">
-              <Input aria-label="Interface / label" placeholder="eth1, mgmt…" value={r.label ?? ''} onChange={(e) => set({ label: e.target.value })} className="h-7 text-[12px]" />
-              <Select aria-label="VLAN" value={r.vlan ?? ''} onChange={(e) => set({ vlan: e.target.value })} className="h-7 text-[12px]">
-                <option value="">No VLAN</option>
-                {vlans.map((v) => (
-                  <option key={v.uid} value={String(v.id)}>
-                    VLAN {v.id} — {v.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            {(invalid || outside) && (
-              <p className="mt-1 text-[11px] text-danger">{invalid ? 'Invalid IPv4 address' : `Outside VLAN ${vlan?.id} (${vlan?.subnet})`}</p>
-            )}
-          </div>
-        );
-      })}
-      <button type="button" onClick={addRow} className="flex items-center gap-1 text-[12px] font-medium text-primary hover:underline">
-        <Plus size={12} /> Add IP address
-      </button>
-    </div>
+          );
+        })}
+        <button type="button" onClick={add} className="flex items-center gap-1 text-[12px] font-medium text-primary hover:underline">
+          <Plus size={12} /> Add IP address
+        </button>
+      </div>
+    </FieldRow>
   );
 }

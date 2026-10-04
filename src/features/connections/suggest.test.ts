@@ -31,3 +31,20 @@ describe('connection suggestions', () => {
     expect(suggestConnection(node('switch', 'a1'), node('l3-switch', 'b1'), [])).toMatchObject({ connType: 'fiber', mode: 'trunk', speed: '10 Gbps' });
   });
 });
+
+describe('multi-homed hosts', () => {
+  const host = () =>
+    node('server', 'mh', { ip: '10.0.20.5', ipLabel: 'eth0', vlan: '20', ips: [{ address: '10.0.99.5', label: 'eth1', vlan: '99' }] });
+  it('each NIC gets an access port in the VLAN of its address', () => {
+    const h = host();
+    const sw = node('switch', 'swm');
+    const first = suggestConnection(h, sw, []);
+    expect(first).toMatchObject({ sourcePort: 'eth0', mode: 'access', vlan: '20' });
+    const second = suggestConnection(h, sw, [{ id: 'x', type: 'network', source: h.id, target: sw.id, data: first }]);
+    expect(second).toMatchObject({ sourcePort: 'eth1', mode: 'access', vlan: '99' });
+  });
+  it('several networks on an interface without address: trunk', () => {
+    const h = node('server', 'mh2', { ip: '10.0.20.6', ipLabel: 'bond0', vlan: '20', ips: [{ address: '10.0.99.6', label: 'bond0.99', vlan: '99' }] });
+    expect(suggestConnection(h, node('switch', 'sw2'), [])).toMatchObject({ mode: 'trunk', vlan: '20,99' });
+  });
+});

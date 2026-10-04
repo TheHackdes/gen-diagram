@@ -29,6 +29,21 @@ export function Dialog({ open, onClose, title, description, children, footer, si
       (first ?? panel.current)?.focus();
     }, 20);
     const onKey = (e: KeyboardEvent) => {
+      // Keep keyboard focus inside the dialog.
+      if (e.key === 'Tab' && panel.current) {
+        const items = [...panel.current.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')];
+        if (items.length) {
+          const first = items[0];
+          const last = items[items.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
       if (e.key === 'Escape') {
         e.stopPropagation();
         onCloseRef.current();

@@ -7,8 +7,8 @@ import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
 import { cn } from '../../ui/cn';
 import { CompactRow, useInCompactHost } from './CompactRow';
-import { extraIps, hasBadges, requiredHeight, shownExtraIps } from '../../../features/nodes/ips';
-import { CapabilityBadges, DetailLines, EditableName, ExtraIpLines, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChip } from './shared';
+import { hasBadges, hiddenAddressCount, requiredHeight, shownAddresses } from '../../../features/nodes/ips';
+import { AddressLines, CapabilityBadges, DetailLines, EditableName, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChips } from './shared';
 
 function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) {
   const compact = useInCompactHost(parentId);
@@ -16,7 +16,9 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
   const color = data.color ?? colorOf(def);
   const os = getOperatingSystem(data.props.os);
   const vlan = useVlan(data.props.vlan);
-  const ip = str(data.props.ip);
+  // All displayed addresses, alike (no "main" one).
+  const addresses = shownAddresses(data.props);
+  const hiddenIps = hiddenAddressCount(data.props);
   const isDocker = def.role === 'docker-container';
   const isLxc = def.role === 'lxc';
 
@@ -40,12 +42,12 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
         <div className="min-w-0 flex-1 leading-tight">
           <EditableName id={id} value={data.name} className="block truncate text-[12px] font-semibold text-fg" />
           <span className="block truncate font-mono text-[10px] text-muted">
-            {image ? `${image}${tag ? `:${tag}` : ''}` : ip || 'container'}
+            {image ? `${image}${tag ? `:${tag}` : ''}` : addresses.map((a) => a.address).join(' · ') || 'container'}
           </span>
         </div>
-        {extraIps(data.props).length > 0 && (
-          <span className="shrink-0 rounded bg-surface-2 px-1 font-mono text-[9px] text-muted" title={extraIps(data.props).map((e) => e.address).join(', ')}>
-            +{extraIps(data.props).length} IP
+        {image && addresses.length > 1 && (
+          <span className="shrink-0 rounded bg-surface-2 px-1 font-mono text-[9px] text-muted" title={addresses.map((a) => a.address).join(', ')}>
+            {addresses.length} IP
           </span>
         )}
         {ports && (
@@ -59,10 +61,9 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
     );
   }
 
-  const subtitle = ip || str(data.props.role) || str(data.props.product) || def.label;
+  const subtitle = str(data.props.role) || str(data.props.product) || def.label;
   const badges = hasBadges(data.props);
-  const hiddenIps = extraIps(data.props).length - shownExtraIps(data.props).length;
-  const showChips = !!os || !!vlan || !!str(data.props.vlan);
+  const showChips = !!os || !!vlan || !!str(data.props.vlan) || addresses.some((a) => a.vlan);
   const minHeight = requiredHeight({ data } as InfraNode) - 16;
 
   return (
@@ -89,6 +90,11 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
       <div className="min-w-0 flex-1 leading-tight">
         <div className="flex items-center gap-1.5">
           <EditableName id={id} value={data.name} className="min-w-0 truncate text-[13px] font-semibold text-fg" />
+          {hiddenIps > 0 && (
+            <span className="shrink-0 rounded bg-surface-2 px-1 text-[9.5px] text-subtle" title={`${hiddenIps} hidden address${hiddenIps > 1 ? 'es' : ''} — listed in the properties panel`}>
+              +{hiddenIps} IP
+            </span>
+          )}
           {def.badge && (
             <span
               className="shrink-0 rounded px-1 text-[9px] font-bold tracking-wide"
@@ -98,19 +104,11 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
             </span>
           )}
         </div>
-        <span className={cn('flex min-w-0 items-center gap-1 text-[11px] text-muted', ip && 'font-mono text-[10.5px]')}>
-          <span className="truncate">{subtitle}</span>
-          {hiddenIps > 0 && (
-            <span className="shrink-0 rounded bg-surface-2 px-1 font-sans text-[9.5px]" title={`${hiddenIps} hidden address${hiddenIps > 1 ? 'es' : ''} — shown in the properties panel`}>
-              +{hiddenIps}
-            </span>
-          )}
-        </span>
-        <ExtraIpLines props={data.props} />
+        {addresses.length ? <AddressLines props={data.props} /> : <span className="block truncate text-[11px] text-muted">{subtitle}</span>}
         <DetailLines props={data.props} />
         {showChips && (
           <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
-            <VlanChip vlan={vlan} raw={str(data.props.vlan)} />
+            <VlanChips props={data.props} />
             <OsChip osId={data.props.os} version={data.props.osVersion} />
           </div>
         )}

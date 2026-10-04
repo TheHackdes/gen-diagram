@@ -16,7 +16,7 @@ import { parallelEdges } from '../features/connections/parallel';
 import { suggestConnection } from '../features/connections/suggest';
 import { autoLayout, relayoutContainer } from '../features/layout/autoLayout';
 import { createNode, createNodeFromPreset, withLayer } from '../features/nodes/factory';
-import { childTop, COMPACT_ROW, COMPACT_WIDTH, compactRoot, fitDeviceHeight, headerHeight, inCompactHost } from '../features/nodes/ips';
+import { childTop, COMPACT_ROW, COMPACT_WIDTH, compactRoot, defaultInterface, fitDeviceHeight, headerHeight, inCompactHost } from '../features/nodes/ips';
 import {
   absolutePosition,
   descendantIds,
@@ -237,7 +237,10 @@ export const useDiagram = create<DiagramState>((set, get) => {
       const subnet = getDefinition(parent.data.type).kind === 'zone' ? zoneSubnet(parent, get().vlans) : '';
       const vlanSubnet = get().vlans.find((v) => String(v.id) === str(props.vlan))?.subnet ?? '';
       const ip = suggestIp(subnet || vlanSubnet, nodes);
-      if (ip) props.ip = ip;
+      if (ip) {
+        props.ip = ip;
+        if (!str(props.ipLabel)) props.ipLabel = defaultInterface(node, 0, str(props.vlan));
+      }
     }
     return { ...node, data: { ...node.data, props } };
   };

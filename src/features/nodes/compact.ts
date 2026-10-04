@@ -3,8 +3,7 @@ import type { InfraNode } from '../../types';
 /** Information that can be shown on each line of a compact host. */
 export const COMPACT_FIELDS = [
   { key: 'type', label: 'Type' },
-  { key: 'ip', label: 'IP address' },
-  { key: 'moreIps', label: 'Other IPs' },
+  { key: 'ip', label: 'IP addresses' },
   { key: 'hostname', label: 'Hostname' },
   { key: 'os', label: 'OS / image' },
   { key: 'resources', label: 'vCPU / RAM' },
@@ -16,7 +15,7 @@ export const COMPACT_FIELDS = [
 
 export type CompactField = (typeof COMPACT_FIELDS)[number]['key'];
 
-export const DEFAULT_COMPACT_FIELDS: CompactField[] = ['type', 'ip', 'moreIps', 'os', 'vlan', 'services'];
+export const DEFAULT_COMPACT_FIELDS: CompactField[] = ['type', 'ip', 'os', 'vlan', 'services'];
 
 const KNOWN = new Set<string>(COMPACT_FIELDS.map((f) => f.key));
 

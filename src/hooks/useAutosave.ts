@@ -10,8 +10,8 @@ export function useAutosave(delay = 1500): void {
       if (s.nodes === prev.nodes && s.edges === prev.edges && s.vlans === prev.vlans && s.metadata === prev.metadata && s.settings === prev.settings && s.dirty === prev.dirty) return;
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
-        // Do not save mid-drag.
-        if (useDiagram.getState().nodes.some((n) => n.dragging)) return;
+        // Do not save mid-drag, nor while an export shows a temporary rules table.
+        if (useDiagram.getState().nodes.some((n) => n.dragging || n.id.startsWith('tmp_'))) return;
         try {
           useDiagram.getState().save();
         } catch {

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { addressProblem } from '../../../features/firewall/rules';
-import { allIps } from '../../../features/nodes/ips';
+import { addressEntries } from '../../../features/nodes/ips';
 import { useDiagram } from '../../../store/diagramStore';
 import type { InfraNode } from '../../../types';
 import { cn } from '../../ui/cn';
@@ -12,19 +12,20 @@ interface Suggestion {
 }
 
 /** Addresses offered as sources / destinations: VLAN subnets, devices, this device. */
-export function useAddressSuggestions(node: InfraNode): { self: string; items: Suggestion[] } {
+export function useAddressSuggestions(node: InfraNode): { own: Suggestion[]; items: Suggestion[] } {
   const vlans = useDiagram((s) => s.vlans);
   const nodes = useDiagram((s) => s.nodes);
   return useMemo(() => {
-    const self = allIps(node.data.props)[0]?.address ?? '';
+    const own = addressEntries(node.data.props)
+      .filter((e) => e.address)
+      .map((e) => ({ value: e.address, label: `This device${e.label ? ` · ${e.label}` : ''}` }));
     const devices: Suggestion[] = [];
     for (const n of nodes) {
       if (n.id === node.id) continue;
-      const ip = allIps(n.data.props)[0]?.address;
-      if (ip) devices.push({ value: ip, label: n.data.name });
+      for (const e of addressEntries(n.data.props)) if (e.address) devices.push({ value: e.address, label: e.label ? `${n.data.name} · ${e.label}` : n.data.name });
     }
     return {
-      self,
+      own,
       items: [
         ...vlans.filter((v) => v.subnet).map((v) => ({ value: v.subnet!, label: `VLAN ${v.id} · ${v.name}` })),
         ...devices.sort((a, b) => a.label.localeCompare(b.label)),
@@ -50,23 +51,30 @@ export function AddressField({
   /** Table cell: no label, no shortcuts. */
   compact?: boolean;
 }) {
-  const { self, items } = useAddressSuggestions(node);
+  const { own, items } = useAddressSuggestions(node);
   const problem = addressProblem(value);
   const listId = `${id}-list`;
   return (
     <div className="min-w-0">
       {!compact && (
-        <div className="mb-1 flex items-center justify-between text-xs font-medium text-muted">
+        <div className="mb-1 flex items-start justify-between gap-2 text-xs font-medium text-muted">
           <label htmlFor={id}>{label}</label>
-          <span className="flex gap-1 font-normal">
+          <span className="flex min-w-0 flex-wrap justify-end gap-x-1 font-normal">
             <button type="button" onClick={() => onChange('any')} className={cn('rounded px-1 text-[11px] hover:text-primary', value === 'any' ? 'text-primary' : 'text-subtle')}>
               any
             </button>
-            {self && (
-              <button type="button" onClick={() => onChange(self)} className={cn('rounded px-1 text-[11px] hover:text-primary', value === self ? 'text-primary' : 'text-subtle')}>
-                this device
+            {/* One shortcut per address of this device (no "main" address). */}
+            {own.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                title={o.label}
+                onClick={() => onChange(o.value)}
+                className={cn('rounded px-1 font-mono text-[10.5px] hover:text-primary', value === o.value ? 'text-primary' : 'text-subtle')}
+              >
+                {own.length > 1 ? o.value : 'this device'}
               </button>
-            )}
+            ))}
           </span>
         </div>
       )}
@@ -84,7 +92,11 @@ export function AddressField({
       />
       <datalist id={listId}>
         <option value="any">Any address</option>
-        {self && <option value={self}>This device</option>}
+        {own.map((o) => (
+          <option key={`own-${o.value}`} value={o.value}>
+            {o.label}
+          </option>
+        ))}
         {items.map((s) => (
           <option key={s.value + s.label} value={s.value}>
             {s.label}

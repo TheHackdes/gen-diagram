@@ -85,8 +85,6 @@ export const SECURITY_FIELDS: FieldDef[] = [
   F.description,
 ];
 
-export const IP_LIST_FIELD: FieldDef = { key: 'ips', label: 'Additional IP addresses', type: 'ipList' };
-
 const opts = (values: string[]) => values.map((v) => ({ value: v, label: v }));
 
 /** Integrated VPN gateway (routers, firewalls). */

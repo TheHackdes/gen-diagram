@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getOperatingSystem } from '../../../data/operatingSystems';
 import { SERVICE_BY_ID, servicesOf } from '../../../data/services';
 import { detailLines } from '../../../features/nodes/details';
-import { MAX_IP_LINES, shownExtraIps } from '../../../features/nodes/ips';
+import { addressEntries, MAX_IP_LINES, shownAddresses } from '../../../features/nodes/ips';
 import { useDiagram } from '../../../store/diagramStore';
 import type { Vlan } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
@@ -210,20 +210,34 @@ export function CapabilityBadges({ props, max = Infinity }: { props: Record<stri
   );
 }
 
-/** Additional addresses (only those marked as shown) listed under the main IP. */
-export function ExtraIpLines({ props }: { props: Record<string, unknown> }) {
+/** VLANs of all the addresses of a node (or of the node itself when it has none). */
+export function VlanChips({ props, max = 3 }: { props: Record<string, unknown>; max?: number }) {
   const vlans = useDiagram((s) => s.vlans);
-  const ips = shownExtraIps(props);
-  if (!ips.length) return null;
-  const shown = ips.slice(0, MAX_IP_LINES);
+  const ids = [...new Set(addressEntries(props).map((e) => e.vlan ?? '').filter(Boolean))];
+  if (!ids.length && str(props.vlan)) ids.push(str(props.vlan));
   return (
     <>
-      {shown.map((e, i) => {
+      {ids.slice(0, max).map((id) => (
+        <VlanChip key={id} vlan={vlans.find((v) => String(v.id) === id)} raw={id} />
+      ))}
+      {ids.length > max && <span className="shrink-0 text-[9.5px] text-subtle">+{ids.length - max}</span>}
+    </>
+  );
+}
+
+/** Every displayed address, one per line: address, interface and VLAN colour. */
+export function AddressLines({ props }: { props: Record<string, unknown> }) {
+  const vlans = useDiagram((s) => s.vlans);
+  const ips = shownAddresses(props);
+  if (!ips.length) return null;
+  return (
+    <>
+      {ips.slice(0, MAX_IP_LINES).map((e, i) => {
         const vlan = vlans.find((v) => String(v.id) === e.vlan);
         return (
           <span key={i} className="flex h-[14px] min-w-0 items-center gap-1 font-mono text-[10.5px] leading-none text-muted">
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: vlan?.color ?? 'var(--border-strong)' }} title={vlan ? `VLAN ${vlan.id}` : undefined} />
-            <span className="shrink-0">{e.address || '—'}</span>
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: vlan?.color ?? 'var(--border-strong)' }} title={vlan ? `VLAN ${vlan.id}` : 'No VLAN'} />
+            <span className="shrink-0">{e.address}</span>
             {e.label && <span className="min-w-0 truncate font-sans text-[10px] text-subtle">{e.label}</span>}
           </span>
         );
