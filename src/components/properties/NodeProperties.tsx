@@ -1,4 +1,4 @@
-import { ChevronDown, CopyPlus, KeyRound, Lock, LockOpen, LogOut, Plus, RotateCcw, ShieldCheck, Trash } from 'lucide-react';
+import { ChevronDown, CopyPlus, KeyRound, Lock, LockOpen, LogOut, Plus, RotateCcw, ShieldCheck, Trash, Wifi, Eye, EyeOff } from 'lucide-react';
 import { useState } from 'react';
 import { CATEGORY_BY_ID } from '../../data/categories';
 import { colorOf, getDefinition, getPreset } from '../../data/catalog';
@@ -11,7 +11,13 @@ import { Icon } from '../icons/Icon';
 import { Button, IconButton } from '../ui/Button';
 import { cn } from '../ui/cn';
 import { FieldRow, Input, Switch } from '../ui/Field';
+import { analyzeBond } from '../../features/connections/bonds';
+import { hasRules } from '../../features/firewall/rules';
+import { DEFAULT_DISPLAY, DETAIL_OPTIONS, displayedKeys } from '../../features/nodes/details';
+import { inCompactHost } from '../../features/nodes/ips';
 import { FieldEditor } from './FieldEditor';
+import { FirewallRulesSection } from './FirewallRulesSection';
+import { ServicesSection } from './ServicesSection';
 
 const ACCENTS = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2', '#db2777', '#475569'];
 
@@ -19,7 +25,7 @@ export function Section({ title, children, action }: { title: string; children: 
   return (
     <section className="border-b border-line px-4 py-3.5">
       <div className="mb-2.5 flex items-center justify-between">
-        <h4 className="text-[11px] font-semibold tracking-wider text-subtle uppercase">{title}</h4>
+        <h4 className="text-[12.5px] font-semibold text-fg">{title}</h4>
         {action}
       </div>
       {children}
@@ -72,6 +78,13 @@ const CAPABILITY_INFO: Record<Capability, { title: string; toggle: string; icon:
     color: '#dc2626',
     hint: 'Firewall running directly on this machine (nftables, ufw, Windows Firewall…).',
   },
+  wifi: {
+    title: 'Integrated Wi-Fi AP',
+    toggle: 'wifi',
+    icon: <Wifi size={14} />,
+    color: '#0ea5e9',
+    hint: 'This equipment is also a Wi-Fi access point (e.g. a router with built-in Wi-Fi).',
+  },
 };
 
 /** Sensible defaults when a service is switched on. */
@@ -80,9 +93,51 @@ function enableDefaults(node: InfraNode, capability: Capability): Record<string,
   if (capability === 'vpn') {
     return { vpn: true, vpnProtocol: str(p.vpnProtocol) || 'WireGuard', vpnMode: str(p.vpnMode) || 'Site-to-site', vpnEndpoint: str(p.vpnEndpoint) || str(p.publicIp) };
   }
+  if (capability === 'wifi') {
+    return { wifi: true, ssid: str(p.ssid) || 'Corp', band: str(p.band) || 'Dual band', wifiStandard: str(p.wifiStandard) || 'Wi-Fi 6 (ax)', wifiSecurity: str(p.wifiSecurity) || 'WPA3-Personal' };
+  }
   const family = getOperatingSystem(p.os)?.family;
   const product = family === 'windows' ? 'Windows Defender Firewall' : family === 'bsd' || family === 'macos' ? 'pf' : p.os === 'ubuntu' ? 'ufw' : ['rhel', 'rocky', 'alma', 'fedora', 'centos'].includes(str(p.os)) ? 'firewalld' : 'nftables';
   return { fw: true, fwProduct: str(p.fwProduct) || product, fwPolicy: str(p.fwPolicy) || 'Default deny' };
+}
+
+/** Choose which details of a service are written on the card. */
+function DisplayPicker({ node, capability }: { node: InfraNode; capability: Capability }) {
+  const update = useDiagram((s) => s.updateNodeProps);
+  const options = DETAIL_OPTIONS[capability];
+  if (!options) return null;
+  const shown = displayedKeys(node.data.props);
+  const toggle = (key: string) => update(node.id, { display: shown.includes(key) ? shown.filter((k) => k !== key) : [...shown, key] });
+  return (
+    <div>
+      <span className="mb-1 flex items-center gap-1 text-xs font-medium text-muted">
+        <Eye size={12} /> Show on diagram
+      </span>
+      <div className="flex flex-wrap gap-1">
+        {options.map((o) => {
+          const on = shown.includes(o.key);
+          const empty = !str(node.data.props[o.key]);
+          return (
+            <button
+              key={o.key}
+              type="button"
+              aria-pressed={on}
+              onClick={() => toggle(o.key)}
+              title={empty ? `${o.label} is empty` : undefined}
+              className={cn(
+                'flex h-6 items-center gap-1 rounded-md border px-1.5 text-[11.5px] transition-colors',
+                on ? 'border-primary bg-primary-soft text-primary' : 'border-line text-muted hover:text-fg',
+                empty && 'opacity-60',
+              )}
+            >
+              {on ? <Eye size={11} /> : <EyeOff size={11} />}
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function CapabilitySection({ node, capability }: { node: InfraNode; capability: Capability }) {
@@ -102,7 +157,17 @@ function CapabilitySection({ node, capability }: { node: InfraNode; capability: 
             id={`cap-${node.id}-${capability}`}
             label={<span className="font-medium">{info.title}</span>}
             checked={enabled}
-            onChange={(v) => update(node.id, v ? enableDefaults(node, capability) : { [info.toggle]: false })}
+            onChange={(v) =>
+              update(
+                node.id,
+                v
+                  ? {
+                      ...enableDefaults(node, capability),
+                      display: [...new Set([...displayedKeys(node.data.props), ...(DEFAULT_DISPLAY[capability] ?? [])])],
+                    }
+                  : { [info.toggle]: false },
+              )
+            }
           />
         </div>
       </div>
@@ -112,9 +177,27 @@ function CapabilitySection({ node, capability }: { node: InfraNode; capability: 
           {fields.map((f) => (
             <FieldEditor key={f.key} node={node} field={f} />
           ))}
+          <DisplayPicker node={node} capability={capability} />
         </div>
       )}
     </section>
+  );
+}
+
+function CompactSection({ node }: { node: InfraNode }) {
+  const setCompact = useDiagram((s) => s.setCompact);
+  const nested = useDiagram((s) => {
+    const byId = new Map(s.nodes.map((n) => [n.id, n]));
+    return inCompactHost(node, byId);
+  });
+  if (nested) return null;
+  return (
+    <Section title="Display">
+      <Switch id={`compact-${node.id}`} label="Compact view" checked={node.data.props.compact === true} onChange={(v) => setCompact(node.id, v)} />
+      <p className="mt-1.5 text-[11.5px] leading-snug text-subtle">
+        One line per {getDefinition(node.data.type).role === 'docker-host' ? 'container' : 'VM, LXC or container'}: name, type, address, OS, VLAN. Drag a line to reorder it.
+      </p>
+    </Section>
   );
 }
 
@@ -122,7 +205,15 @@ function Connections({ node }: { node: InfraNode }) {
   const edges = useDiagram((s) => s.edges);
   const nodes = useDiagram((s) => s.nodes);
   const select = useDiagram((s) => s.select);
+  const bonds = useDiagram((s) => s.bonds);
   const mine = edges.filter((e) => e.source === node.id || e.target === node.id);
+  // Name of the aggregate on this device's side (e.g. "bond0" on the host, "Po1" on the switch).
+  const bondName = (e: (typeof edges)[number]) => {
+    const b = bonds.find((x) => x.id === e.data?.bondId);
+    if (!b) return '';
+    const [, sideB] = analyzeBond(b, edges, nodes).sides;
+    return b.peerName && sideB.includes(node.id) ? b.peerName : b.name;
+  };
   if (!mine.length) return null;
   return (
     <Section title={`Connections (${mine.length})`}>
@@ -143,6 +234,7 @@ function Connections({ node }: { node: InfraNode }) {
                 <span className="text-subtle">→</span>
                 <span className="min-w-0 flex-1 truncate font-medium text-fg">{peer?.data.name}</span>
                 {remotePort && <span className="font-mono text-[10.5px] text-subtle">{remotePort}</span>}
+                {bondName(e) && <span className="rounded bg-surface-2 px-1 font-mono text-[10px] text-muted">{bondName(e)}</span>}
               </button>
             </li>
           );
@@ -174,7 +266,7 @@ export function NodeProperties({ node }: { node: InfraNode }) {
           <Icon name={def.icon} size={20} brandColor={def.icon.startsWith('brand:')} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold tracking-wider uppercase" style={{ color }}>
+          <div className="text-[12px] font-medium" style={{ color }}>
             {def.label}
           </div>
           <div className="truncate text-[15px] font-semibold text-fg">{named ? node.data.name : def.label}</div>
@@ -191,6 +283,7 @@ export function NodeProperties({ node }: { node: InfraNode }) {
       </div>
 
       <QuickAdd node={node} />
+      {def.kind === 'container' && <CompactSection node={node} />}
 
       <Section title="Properties">
         <div className="space-y-3">
@@ -229,6 +322,8 @@ export function NodeProperties({ node }: { node: InfraNode }) {
       </Section>
 
       {def.capabilities?.map((c) => <CapabilitySection key={c} node={node} capability={c} />)}
+      {hasRules(node) && <FirewallRulesSection node={node} />}
+      {def.fields.some((f) => f.key === 'ip') && <ServicesSection node={node} />}
 
       <Connections node={node} />
 

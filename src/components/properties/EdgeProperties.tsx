@@ -8,6 +8,7 @@ import { Button, IconButton } from '../ui/Button';
 import { cn } from '../ui/cn';
 import { FieldRow, Input, Segmented, Textarea } from '../ui/Field';
 import { VlanMultiSelect, VlanSelect } from './FieldEditor';
+import { BondSection, ParallelLinksSection } from './BondSection';
 import { Section } from './NodeProperties';
 
 const SPEEDS = ['100 Mbps', '1 Gbps', '2.5 Gbps', '10 Gbps', '25 Gbps', '40 Gbps', '100 Gbps', 'Wi-Fi 6', 'Wi-Fi 7'];
@@ -38,7 +39,7 @@ export function EdgeProperties({ edge }: { edge: InfraEdge }) {
   return (
     <div>
       <div className="border-b border-line px-4 py-4">
-        <div className="mb-2 text-[11px] font-semibold tracking-wider text-primary uppercase">Connection</div>
+        <div className="mb-2 text-[12px] font-medium text-muted">Connection</div>
         <div className="flex items-center gap-1.5">
           <Endpoint name={source?.data.name} type={source?.data.type} />
           <IconButton label="Reverse direction" size="sm" onClick={() => reverse(edge.id)}>
@@ -70,6 +71,13 @@ export function EdgeProperties({ edge }: { edge: InfraEdge }) {
           ))}
         </div>
       </Section>
+
+      {data.connType !== 'arrow' && data.connType !== 'logical' && (
+        <>
+          <ParallelLinksSection edge={edge} />
+          <BondSection edge={edge} />
+        </>
+      )}
 
       <Section title="Properties">
         <div className="space-y-3">

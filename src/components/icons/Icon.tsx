@@ -52,6 +52,10 @@ import {
   Radio,
   Layers2,
   PanelsTopLeft,
+  Clock,
+  Mail,
+  Activity,
+  Table,
 } from 'lucide-react';
 import { BRANDS } from './brands';
 
@@ -112,6 +116,10 @@ export const LUCIDE_ICONS: Record<string, LucideIcon> = {
   arrow: ArrowRight,
   area: SquareDashed,
   building: Building,
+  clock: Clock,
+  mail: Mail,
+  monitoring: Activity,
+  table: Table,
 };
 
 interface IconProps {

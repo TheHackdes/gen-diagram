@@ -6,10 +6,12 @@ import { getOperatingSystem } from '../../../data/operatingSystems';
 import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
 import { cn } from '../../ui/cn';
-import { extraIps, requiredHeight } from '../../../features/nodes/ips';
-import { CapabilityBadges, EditableName, ExtraIpLines, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChip } from './shared';
+import { CompactRow, useInCompactHost } from './CompactRow';
+import { extraIps, hasBadges, requiredHeight, shownExtraIps } from '../../../features/nodes/ips';
+import { CapabilityBadges, DetailLines, EditableName, ExtraIpLines, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChip } from './shared';
 
-function DeviceNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
+function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) {
+  const compact = useInCompactHost(parentId);
   const def = getDefinition(data.type);
   const color = data.color ?? colorOf(def);
   const os = getOperatingSystem(data.props.os);
@@ -17,6 +19,8 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
   const ip = str(data.props.ip);
   const isDocker = def.role === 'docker-container';
   const isLxc = def.role === 'lxc';
+
+  if (compact) return <CompactRow id={id} data={data} selected={selected} />;
 
   if (isDocker) {
     const image = str(data.props.image);
@@ -56,8 +60,9 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
   }
 
   const subtitle = ip || str(data.props.role) || str(data.props.product) || def.label;
-  const hasCaps = data.props.fw === true || data.props.vpn === true;
-  const showChips = !!os || !!vlan || !!str(data.props.vlan) || hasCaps;
+  const badges = hasBadges(data.props);
+  const hiddenIps = extraIps(data.props).length - shownExtraIps(data.props).length;
+  const showChips = !!os || !!vlan || !!str(data.props.vlan);
   const minHeight = requiredHeight({ data } as InfraNode) - 16;
 
   return (
@@ -93,13 +98,25 @@ function DeviceNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
             </span>
           )}
         </div>
-        <span className={cn('block truncate text-[11px] text-muted', ip && 'font-mono text-[10.5px]')}>{subtitle}</span>
+        <span className={cn('flex min-w-0 items-center gap-1 text-[11px] text-muted', ip && 'font-mono text-[10.5px]')}>
+          <span className="truncate">{subtitle}</span>
+          {hiddenIps > 0 && (
+            <span className="shrink-0 rounded bg-surface-2 px-1 font-sans text-[9.5px]" title={`${hiddenIps} hidden address${hiddenIps > 1 ? 'es' : ''} — shown in the properties panel`}>
+              +{hiddenIps}
+            </span>
+          )}
+        </span>
         <ExtraIpLines props={data.props} />
+        <DetailLines props={data.props} />
         {showChips && (
           <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
             <VlanChip vlan={vlan} raw={str(data.props.vlan)} />
             <OsChip osId={data.props.os} version={data.props.osVersion} />
-            <CapabilityBadges props={data.props} />
+          </div>
+        )}
+        {badges && (
+          <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
+            <CapabilityBadges props={data.props} max={4} />
           </div>
         )}
       </div>

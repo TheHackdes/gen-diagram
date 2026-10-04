@@ -65,7 +65,7 @@ function ConnectionPicker() {
   const set = useDiagram((s) => s.setDefaultConnType);
   return (
     <div className="border-t border-line p-3">
-      <label htmlFor="conn-type" className="mb-1.5 block text-[11px] font-semibold tracking-wide text-subtle uppercase">
+      <label htmlFor="conn-type" className="mb-1.5 block text-[12px] font-medium text-muted">
         New links
       </label>
       <select
@@ -159,7 +159,7 @@ export function Library() {
                   type="button"
                   onClick={() => toggle(cat.id)}
                   aria-expanded={open}
-                  className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-[11.5px] font-semibold tracking-wide text-muted uppercase hover:text-fg"
+                  className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-[12.5px] font-semibold text-muted hover:text-fg"
                 >
                   <ChevronRight size={13} className={cn('transition-transform', open && 'rotate-90')} />
                   <span className="h-2 w-2 rounded-full" style={{ background: cat.color }} />

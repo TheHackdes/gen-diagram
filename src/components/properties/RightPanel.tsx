@@ -14,7 +14,7 @@ function SelectionProperties() {
   const selectedEdges = useDiagram(useShallow((s) => s.edges.filter((e) => e.selected)));
   if (selectedNodes.length === 1 && selectedEdges.length === 0) return <NodeProperties key={selectedNodes[0].id} node={selectedNodes[0]} />;
   if (selectedNodes.length === 0 && selectedEdges.length === 1) return <EdgeProperties key={selectedEdges[0].id} edge={selectedEdges[0]} />;
-  if (selectedNodes.length + selectedEdges.length > 1) return <MultiProperties nodes={selectedNodes} edgeCount={selectedEdges.length} />;
+  if (selectedNodes.length + selectedEdges.length > 1) return <MultiProperties nodes={selectedNodes} edgeIds={selectedEdges.map((e) => e.id)} />;
   return <DiagramProperties />;
 }
 

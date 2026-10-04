@@ -43,14 +43,14 @@ export function Label({ children, htmlFor, hint }: { children: ReactNode; htmlFo
   );
 }
 
-export function FieldRow({ label, htmlFor, children, error, hint }: { label: ReactNode; htmlFor?: string; children: ReactNode; error?: string | null; hint?: ReactNode }) {
+export function FieldRow({ label, htmlFor, children, error, hint, help }: { label: ReactNode; htmlFor?: string; children: ReactNode; error?: string | null; hint?: ReactNode; help?: ReactNode }) {
   return (
     <div>
       <Label htmlFor={htmlFor} hint={hint}>
         {label}
       </Label>
       {children}
-      {error && <p className="mt-1 text-[11px] text-danger">{error}</p>}
+      {error ? <p className="mt-1 text-[11px] text-danger">{error}</p> : help && <p className="mt-1 text-[11px] leading-snug text-subtle">{help}</p>}
     </div>
   );
 }

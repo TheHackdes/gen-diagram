@@ -42,6 +42,15 @@ export function cidrEquals(a: unknown, b: unknown): boolean {
   return !!x && !!y && x.network === y.network && x.prefix === y.prefix;
 }
 
+/** Do two networks share at least one address (one contains the other)? */
+export function cidrOverlaps(a: unknown, b: unknown): boolean {
+  const x = parseCidr(a);
+  const y = parseCidr(b);
+  if (!x || !y) return false;
+  const mask = x.prefix < y.prefix ? x.mask : y.mask;
+  return ((x.network & mask) >>> 0) === ((y.network & mask) >>> 0);
+}
+
 export function isValidIPv4(value: unknown): boolean {
   return parseIPv4(value) !== null;
 }

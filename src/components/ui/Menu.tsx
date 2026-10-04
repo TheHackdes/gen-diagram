@@ -55,7 +55,7 @@ export function MenuList({ items, onClose, className }: MenuListProps) {
         if (item === 'separator') return <div key={`s${i}`} className="my-1 h-px bg-line" />;
         if ('heading' in item)
           return (
-            <div key={`h${i}`} className="px-2.5 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-subtle uppercase">
+            <div key={`h${i}`} className="px-2.5 pt-2 pb-1 text-[12px] font-medium text-subtle">
               {item.heading}
             </div>
           );

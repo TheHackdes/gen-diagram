@@ -1,7 +1,7 @@
 import { getDefinition } from '../../data/catalog';
 import type { ConnectionType, InfraEdge, InfraEdgeData, InfraNode, NodeRole } from '../../types';
 import { str } from '../../utils/misc';
-import { hasVpn } from '../nodes/ips';
+import { hasVpn, hasWifi } from '../nodes/ips';
 
 const SWITCHING: NodeRole[] = ['switch', 'core-switch'];
 const INFRA_TRUNK: NodeRole[] = ['switch', 'core-switch', 'router', 'firewall', 'hypervisor', 'ap', 'bridge'];
@@ -56,9 +56,10 @@ function inferType(a: InfraNode, b: InfraNode): ConnectionType {
   if (getDefinition(a.data.type).kind === 'annotation' || getDefinition(b.data.type).kind === 'annotation') return 'arrow';
   // Two VPN-capable ends (dedicated gateway or router/firewall with integrated VPN) → tunnel.
   if (hasVpn(a) && hasVpn(b)) return 'vpn';
-  if (has('vpn') && (has('wan') || has('cloud'))) return 'vpn';
+  // Site-to-site VPN to a cloud provider; the link to the Internet itself is a WAN uplink.
+  if ((hasVpn(a) && rb === 'cloud') || (hasVpn(b) && ra === 'cloud')) return 'vpn';
   if (has('wan') || has('cloud')) return 'wan';
-  if (has('ap') && (WIRELESS_CLIENTS.has(a.data.type) || WIRELESS_CLIENTS.has(b.data.type))) return 'wifi';
+  if ((hasWifi(a) && WIRELESS_CLIENTS.has(b.data.type)) || (hasWifi(b) && WIRELESS_CLIENTS.has(a.data.type))) return 'wifi';
   if (a.data.type === 'san' || b.data.type === 'san') return 'fiber';
   if (SWITCHING.includes(ra) && SWITCHING.includes(rb)) return 'fiber';
   if (GUESTS.includes(ra) && GUESTS.includes(rb)) return 'logical';
@@ -95,6 +96,19 @@ export function suggestConnection(
     if (proto) data.label = proto;
     return data;
   }
+  if (connType === 'wifi') {
+    // Radio association: no switch port is used. Client gets its wireless NIC, AP side shows the SSID.
+    const ssidOf = (n: InfraNode) => str(n.data.props.ssid).split(',')[0]?.trim() ?? '';
+    if (hasWifi(source) && !hasWifi(target)) {
+      data.sourcePort = ssidOf(source);
+      data.targetPort = 'wlan0';
+    } else if (hasWifi(target)) {
+      data.sourcePort = 'wlan0';
+      data.targetPort = ssidOf(target);
+    }
+    data.speed = 'Wi-Fi 6';
+    return data;
+  }
   if (connType !== 'wan') {
     data.sourcePort = nextPort(source, edges);
     data.targetPort = nextPort(target, edges);
@@ -108,7 +122,7 @@ export function suggestConnection(
   else if (connType === 'ethernet') {
     const storage = rs === 'storage' || rt === 'storage' || rs === 'hypervisor' || rt === 'hypervisor';
     data.speed = storage ? '10 Gbps' : '1 Gbps';
-  } else if (connType === 'wifi') data.speed = 'Wi-Fi 6';
+  }
 
   const bothInfra = INFRA_TRUNK.includes(rs) && INFRA_TRUNK.includes(rt);
   if (bothInfra && (SWITCHING.includes(rs) || SWITCHING.includes(rt))) {

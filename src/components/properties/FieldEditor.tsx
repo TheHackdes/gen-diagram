@@ -5,6 +5,7 @@ import { isValidCidr, isValidIPv4, isValidMac } from '../../utils/ip';
 import { str } from '../../utils/misc';
 import { cn } from '../ui/cn';
 import { FieldRow, Input, Select, Switch, Textarea } from '../ui/Field';
+import { hasRules } from '../../features/firewall/rules';
 import { IpListEditor } from './IpListEditor';
 import { OsPicker } from './OsPicker';
 import { suggestionFor } from './suggestions';
@@ -122,6 +123,20 @@ export function FieldEditor({ node, field }: { node: InfraNode; field: FieldDef 
       </FieldRow>
     );
 
+  if (field.type === 'nodeRef')
+    return (
+      <FieldRow label={field.label} htmlFor={id}>
+        <Select id={id} value={value || 'all'} onChange={(e) => set(e.target.value)}>
+          <option value="all">All equipment</option>
+          {nodes.filter(hasRules).map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.data.name}
+            </option>
+          ))}
+        </Select>
+      </FieldRow>
+    );
+
   if (field.type === 'boolean')
     return <Switch id={id} label={field.label} checked={node.data.props[field.key] === true} onChange={(v) => set(v)} />;
 
@@ -178,6 +193,7 @@ export function FieldEditor({ node, field }: { node: InfraNode; field: FieldDef 
       label={field.label}
       htmlFor={id}
       error={error}
+      help={field.help}
       hint={
         suggestion ? (
           <button type="button" onClick={() => set(suggestion)} className="inline-flex items-center gap-1 font-medium text-primary hover:underline" title="Apply suggestion (Tab)">

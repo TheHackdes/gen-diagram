@@ -5,6 +5,8 @@ import { CATEGORIES } from '../../data/categories';
 import { getDefinition, isContainerDef } from '../../data/catalog';
 import type { InfraEdge, InfraNode, LayoutAlgorithm, NodeRole } from '../../types';
 import { nodeSize, sortByHierarchy } from '../nodes/hierarchy';
+import { childTop, COMPACT_ROW, isCompactHost, requiredHeight } from '../nodes/ips';
+import { str } from '../../utils/misc';
 
 export const LAYOUT_ALGORITHMS: { id: LayoutAlgorithm; label: string; description: string }[] = [
   { id: 'network', label: 'Network', description: 'Top-down from Internet to endpoints, by device tier.' },
@@ -15,7 +17,6 @@ export const LAYOUT_ALGORITHMS: { id: LayoutAlgorithm; label: string; descriptio
 ];
 
 const PAD = 24;
-const HEADER = 60;
 const GAP = 20;
 
 /** Lower tiers are placed closer to the top (Internet first, endpoints last). */
@@ -54,6 +55,8 @@ interface Ctx {
   positions: Map<string, { x: number; y: number }>;
   children: Map<string | undefined, InfraNode[]>;
   parentOf: Map<string, string | undefined>;
+  /** Nodes whose size was set by the layout (containers, compact rows, reset rows). */
+  resized: Set<string>;
 }
 
 const isFloatingAnnotation = (n: InfraNode) => {
@@ -85,10 +88,13 @@ function ancestorUnder(id: string, parentId: string | undefined, ctx: Ctx): stri
 function localEdges(parentId: string | undefined, ids: Set<string>, ctx: Ctx): [string, string][] {
   const seen = new Set<string>();
   const out: [string, string][] = [];
+  const group = (id: string) => str(ctx.nodes.find((n) => n.id === id)?.data.props.redundancyGroup).trim();
   for (const e of ctx.edges) {
     const a = ancestorUnder(e.source, parentId, ctx);
     const b = ancestorUnder(e.target, parentId, ctx);
     if (!a || !b || a === b || !ids.has(a) || !ids.has(b)) continue;
+    // Peer links inside a stack / MLAG / HA pair keep both peers on the same rank.
+    if (group(a) && group(a) === group(b)) continue;
     const key = `${a}->${b}`;
     if (seen.has(key) || seen.has(`${b}->${a}`)) continue;
     seen.add(key);
@@ -202,13 +208,55 @@ function sortForGrid(items: InfraNode[]): InfraNode[] {
   });
 }
 
+const COMPACT_PAD = 10;
+const COMPACT_GAP = 4;
+const COMPACT_MIN_WIDTH = 360;
+
+/**
+ * Compact host: every guest is a full-width line, stacked in their current
+ * vertical order (so dragging a line up or down reorders it). Nested hosts
+ * (a Docker host in Proxmox) become compact blocks with their own lines.
+ */
+function compactLayout(parent: InfraNode, ctx: Ctx, width: number, nested: boolean): number {
+  const kids = (ctx.children.get(parent.id) ?? [])
+    .slice()
+    .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
+  const rowWidth = width - COMPACT_PAD * 2;
+  let y = childTop(parent, nested);
+  for (const k of kids) {
+    const def = getDefinition(k.data.type);
+    const height = def.kind === 'container' || (ctx.children.get(k.id)?.length ?? 0) > 0 ? compactLayout(k, ctx, rowWidth, true) : COMPACT_ROW;
+    ctx.sizes.set(k.id, { width: rowWidth, height });
+    ctx.resized.add(k.id);
+    ctx.positions.set(k.id, { x: COMPACT_PAD, y });
+    y += height + COMPACT_GAP;
+  }
+  const height = kids.length ? y - COMPACT_GAP + COMPACT_PAD : childTop(parent, nested) + (nested ? 6 : 60);
+  ctx.sizes.set(parent.id, { width, height });
+  ctx.resized.add(parent.id);
+  return height;
+}
+
+/** Guests leaving compact view get their normal card size back. */
+function restoreCardSize(k: InfraNode, ctx: Ctx): void {
+  const def = getDefinition(k.data.type);
+  if (def.kind !== 'device' || nodeSize(k).height > COMPACT_ROW) return;
+  ctx.sizes.set(k.id, { width: def.size.width, height: requiredHeight(k) });
+  ctx.resized.add(k.id);
+}
+
 /** Lay out the children of a container, returning the container's new size. */
 function layoutContainer(parent: InfraNode, ctx: Ctx, byId: Map<string, InfraNode>): void {
   const kids = ctx.children.get(parent.id) ?? [];
+  if (isCompactHost(parent)) {
+    compactLayout(parent, ctx, Math.max(nodeSize(parent).width, COMPACT_MIN_WIDTH), false);
+    return;
+  }
   if (!kids.length) {
     ctx.sizes.set(parent.id, nodeSize(parent));
     return;
   }
+  for (const k of kids) restoreCardSize(k, ctx);
   for (const k of kids) if (ctx.children.get(k.id)?.length) layoutContainer(k, ctx, byId);
   const ids = new Set(kids.map((k) => k.id));
   const pairs = orientByTier(localEdges(parent.id, ids, ctx), ctx, byId);
@@ -218,6 +266,7 @@ function layoutContainer(parent: InfraNode, ctx: Ctx, byId: Map<string, InfraNod
       ? runDagre(sorted, pairs, ctx, { rankdir: 'TB', nodesep: GAP + 8, ranksep: 44 })
       : runShelf(sorted, ctx, GAP);
 
+  const top = childTop(parent);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -232,29 +281,17 @@ function layoutContainer(parent: InfraNode, ctx: Ctx, byId: Map<string, InfraNod
   }
   for (const k of kids) {
     const p = local.get(k.id)!;
-    ctx.positions.set(k.id, { x: Math.round(p.x - minX + PAD), y: Math.round(p.y - minY + HEADER) });
+    ctx.positions.set(k.id, { x: Math.round(p.x - minX + PAD), y: Math.round(p.y - minY + top) });
   }
   ctx.sizes.set(parent.id, {
     width: Math.round(Math.max(260, maxX - minX + PAD * 2)),
-    height: Math.round(Math.max(140, maxY - minY + HEADER + PAD)),
+    height: Math.round(Math.max(140, maxY - minY + top + PAD)),
   });
+  ctx.resized.add(parent.id);
 }
 
-/**
- * Re-arrange the diagram. Containers are laid out bottom-up (children grid or
- * mini-dagre), then the top level is arranged with the selected algorithm.
- */
-export function autoLayout(nodes: InfraNode[], edges: InfraEdge[], algorithm: LayoutAlgorithm): InfraNode[] {
-  const ctx: Ctx = {
-    nodes,
-    edges,
-    algorithm,
-    sizes: new Map(),
-    positions: new Map(),
-    children: new Map(),
-    parentOf: new Map(),
-  };
-  const byId = new Map(nodes.map((n) => [n.id, n]));
+function buildCtx(nodes: InfraNode[], edges: InfraEdge[], algorithm: LayoutAlgorithm): Ctx {
+  const ctx: Ctx = { nodes, edges, algorithm, sizes: new Map(), positions: new Map(), children: new Map(), parentOf: new Map(), resized: new Set() };
   for (const n of nodes) {
     ctx.parentOf.set(n.id, n.parentId);
     const list = ctx.children.get(n.parentId) ?? [];
@@ -262,35 +299,118 @@ export function autoLayout(nodes: InfraNode[], edges: InfraEdge[], algorithm: La
     ctx.children.set(n.parentId, list);
     ctx.sizes.set(n.id, nodeSize(n));
   }
+  return ctx;
+}
+
+function applyCtx(nodes: InfraNode[], ctx: Ctx): InfraNode[] {
+  return nodes.map((n) => {
+    const pos = ctx.positions.get(n.id);
+    const resized = ctx.resized.has(n.id);
+    if (!pos && !resized) return n;
+    const next: InfraNode = { ...n, position: pos ?? n.position };
+    if (resized) {
+      const size = ctx.sizes.get(n.id)!;
+      next.width = size.width;
+      next.height = size.height;
+      next.measured = undefined;
+    }
+    return next;
+  });
+}
+
+/** Re-arrange the inside of one host (after toggling compact view, adding or moving guests…). */
+export function relayoutContainer(nodes: InfraNode[], edges: InfraEdge[], id: string): InfraNode[] {
+  const ctx = buildCtx(nodes, edges, 'network');
+  const node = nodes.find((n) => n.id === id);
+  if (!node) return nodes;
+  layoutContainer(node, ctx, new Map(nodes.map((n) => [n.id, n])));
+  return sortByHierarchy(applyCtx(nodes, ctx));
+}
+
+/**
+ * Re-arrange the diagram. Containers are laid out bottom-up (children grid or
+ * mini-dagre), then the top level is arranged with the selected algorithm.
+ */
+export function autoLayout(nodes: InfraNode[], edges: InfraEdge[], algorithm: LayoutAlgorithm): InfraNode[] {
+  const ctx = buildCtx(nodes, edges, algorithm);
+  const byId = new Map(nodes.map((n) => [n.id, n]));
   // Locked nodes keep their place; their children too.
   const top = (ctx.children.get(undefined) ?? []).filter((n) => !isFloatingAnnotation(n));
   for (const n of top) if (ctx.children.get(n.id)?.length) layoutContainer(n, ctx, byId);
   const movable = top.filter((n) => !n.data.locked);
   const ids = new Set(movable.map((n) => n.id));
+
+  // A stack / MLAG pair / HA cluster is laid out as one block, members side by side.
+  const PEER_GAP = 40;
+  const blocks = new Map<string, InfraNode[]>();
+  for (const n of movable) {
+    const g = str(n.data.props.redundancyGroup).trim();
+    if (g) blocks.set(g, [...(blocks.get(g) ?? []), n]);
+  }
+  const alias = new Map<string, string>();
+  // Ungrouped nodes now; groups (or single-member groups) are added below.
+  const items: InfraNode[] = movable.filter((n) => !str(n.data.props.redundancyGroup).trim());
+  for (const [g, members] of blocks) {
+    if (members.length < 2) {
+      items.push(members[0]);
+      continue;
+    }
+    members.sort((a, b) => a.data.name.localeCompare(b.data.name));
+    const id = `group:${g}`;
+    for (const m of members) alias.set(m.id, id);
+    const sizes = members.map((m) => ctx.sizes.get(m.id)!);
+    ctx.sizes.set(id, {
+      width: sizes.reduce((acc, z) => acc + z.width, 0) + PEER_GAP * (members.length - 1),
+      height: Math.max(...sizes.map((z) => z.height)),
+    });
+    items.push({ ...members[0], id, position: members[0].position });
+  }
+  const toItem = (pairs: [string, string][]): [string, string][] => {
+    const seen = new Set<string>();
+    const out: [string, string][] = [];
+    for (const [a, b] of pairs) {
+      const x = alias.get(a) ?? a;
+      const y = alias.get(b) ?? b;
+      if (x === y || seen.has(`${x}>${y}`)) continue;
+      seen.add(`${x}>${y}`);
+      out.push([x, y]);
+    }
+    return out;
+  };
   const rawPairs = localEdges(undefined, ids, ctx);
+  const tiered = toItem(orientByTier(rawPairs, ctx, byId));
 
   let placed: Map<string, { x: number; y: number }>;
   switch (algorithm) {
     case 'hierarchical':
-      placed = runDagre(movable, rawPairs, ctx, { rankdir: 'TB', nodesep: 56, ranksep: 96 });
+      placed = runDagre(items, toItem(rawPairs), ctx, { rankdir: 'TB', nodesep: 56, ranksep: 96 });
       break;
     case 'network':
-      placed = runDagre(movable, orientByTier(rawPairs, ctx, byId), ctx, { rankdir: 'TB', nodesep: 56, ranksep: 96 });
+      placed = runDagre(items, tiered, ctx, { rankdir: 'TB', nodesep: 56, ranksep: 96 });
       break;
     case 'tree':
-      placed = runDagre(movable, orientByTier(rawPairs, ctx, byId), ctx, {
-        rankdir: 'LR',
-        nodesep: 32,
-        ranksep: 110,
-        ranker: 'tight-tree',
-      });
+      placed = runDagre(items, tiered, ctx, { rankdir: 'LR', nodesep: 32, ranksep: 110, ranker: 'tight-tree' });
       break;
     case 'force':
-      placed = runForce(movable, rawPairs, ctx);
+      placed = runForce(items, toItem(rawPairs), ctx);
       break;
     case 'grid':
     default:
-      placed = runShelf(sortForGrid(movable), ctx, 56);
+      placed = runShelf(sortForGrid(items), ctx, 56);
+  }
+  // Expand blocks back into their members.
+  for (const [g, members] of blocks) {
+    const id = `group:${g}`;
+    const p = placed.get(id);
+    if (!p) continue;
+    placed.delete(id);
+    const height = ctx.sizes.get(id)!.height;
+    let x = p.x;
+    for (const m of members) {
+      const sz = ctx.sizes.get(m.id)!;
+      placed.set(m.id, { x, y: p.y + (height - sz.height) / 2 });
+      x += sz.width + PEER_GAP;
+    }
   }
 
   // Normalize to the origin of the previous diagram.
@@ -318,7 +438,8 @@ export function autoLayout(nodes: InfraNode[], edges: InfraEdge[], algorithm: La
   // Floating annotations: titles above the diagram, the rest in a right column.
   const floating = (ctx.children.get(undefined) ?? []).filter((n) => isFloatingAnnotation(n) && !n.data.locked);
   const titles = floating.filter((n) => n.data.type === 'title');
-  const others = floating.filter((n) => n.data.type !== 'title');
+  const others = floating.filter((n) => n.data.type !== 'title' && n.data.type !== 'fw-table');
+  // Firewall rule tables are docked on the right by dockTables().
   let ty = (Number.isFinite(topY) ? topY : 0) - 24;
   for (const t of titles.slice().reverse()) {
     const s = ctx.sizes.get(t.id)!;
@@ -333,17 +454,48 @@ export function autoLayout(nodes: InfraNode[], edges: InfraEdge[], algorithm: La
     cy += ctx.sizes.get(o.id)!.height + 24;
   }
 
-  const result = nodes.map((n) => {
-    const pos = ctx.positions.get(n.id);
-    const size = ctx.sizes.get(n.id)!;
-    const isParent = (ctx.children.get(n.id)?.length ?? 0) > 0;
-    if (!pos && !isParent) return n;
-    const next: InfraNode = { ...n, position: pos ?? n.position };
-    if (isParent) {
-      next.width = size.width;
-      next.height = size.height;
+  const result = applyCtx(nodes, ctx);
+  return sortByHierarchy(dockTables(result));
+}
+
+/* ------------------------------------------------------------------ */
+/* Firewall rule tables docked on the right                            */
+/* ------------------------------------------------------------------ */
+
+const DOCK_GAP = 64;
+
+/** Tables that follow the right edge of the diagram (default for rule tables). */
+export const isDockedTable = (n: InfraNode) => n.data.type === 'fw-table' && !n.parentId && n.data.props.dock !== false;
+
+/**
+ * Keep firewall rule tables to the right of everything else, stacked from the
+ * top of the diagram. Returns the same array when nothing moves.
+ */
+export function dockTables(nodes: InfraNode[]): InfraNode[] {
+  const changes = new Map<string, Partial<InfraNode>>();
+  // Undocked tables become draggable again.
+  for (const n of nodes)
+    if (n.data.type === 'fw-table' && !isDockedTable(n) && n.draggable === false && !n.data.locked) changes.set(n.id, { draggable: undefined });
+  const tables = nodes.filter(isDockedTable);
+  const rest = nodes.filter((n) => !n.parentId && !isDockedTable(n));
+  if (tables.length && rest.length) {
+    let right = -Infinity;
+    let top = Infinity;
+    for (const n of rest) {
+      right = Math.max(right, n.position.x + nodeSize(n).width);
+      top = Math.min(top, n.position.y);
     }
-    return next;
-  });
-  return sortByHierarchy(result);
+    let y = top;
+    for (const t of tables.slice().sort((a, b) => a.position.y - b.position.y || a.id.localeCompare(b.id))) {
+      const p = { x: Math.round(right + DOCK_GAP), y: Math.round(y) };
+      const patch: Partial<InfraNode> = {};
+      if (Math.abs(t.position.x - p.x) > 0.5 || Math.abs(t.position.y - p.y) > 0.5) patch.position = p;
+      // A docked table cannot be dragged away: it would fight the docking.
+      if (t.draggable !== false) patch.draggable = false;
+      if (Object.keys(patch).length) changes.set(t.id, patch);
+      y += nodeSize(t).height + 32;
+    }
+  }
+  if (!changes.size) return nodes;
+  return nodes.map((n) => (changes.has(n.id) ? { ...n, ...changes.get(n.id) } : n));
 }

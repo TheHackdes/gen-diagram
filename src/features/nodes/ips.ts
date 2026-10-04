@@ -1,6 +1,8 @@
 import { getDefinition } from '../../data/catalog';
 import type { InfraNode, IpEntry } from '../../types';
 import { str } from '../../utils/misc';
+import { servicesOf } from '../../data/services';
+import { detailLines } from './details';
 
 /** Additional addresses of a node (props.ips), tolerant to malformed data. */
 export function extraIps(props: Record<string, unknown>): IpEntry[] {
@@ -8,7 +10,17 @@ export function extraIps(props: Record<string, unknown>): IpEntry[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((x): x is IpEntry => !!x && typeof x === 'object' && typeof (x as IpEntry).address === 'string')
-    .map((x) => ({ address: x.address, label: str(x.label), vlan: str(x.vlan) }));
+    .map((x) => ({ address: x.address, label: str(x.label), vlan: str(x.vlan), show: x.show !== false }));
+}
+
+/** Additional addresses the user chose to display on the diagram. */
+export function shownExtraIps(props: Record<string, unknown>): IpEntry[] {
+  return extraIps(props).filter((e) => e.show !== false);
+}
+
+/** Does the card show a badge row (integrated services or extra roles)? */
+export function hasBadges(props: Record<string, unknown>): boolean {
+  return props.fw === true || props.vpn === true || props.wifi === true || servicesOf(props).length > 0;
 }
 
 /** Every address of a node: main IP first, then additional ones. */
@@ -19,15 +31,68 @@ export function allIps(props: Record<string, unknown>): IpEntry[] {
 
 export const MAX_IP_LINES = 4;
 const LINE = 14;
+const BADGE_ROW = 20;
 
 /** Device cards grow to show their additional addresses. */
 export function requiredHeight(node: InfraNode): number {
   const def = getDefinition(node.data.type);
   if (def.renderer !== 'device' || def.role === 'docker-container') return def.size.height;
-  const n = extraIps(node.data.props).length;
-  if (!n) return def.size.height;
+  const n = shownExtraIps(node.data.props).length;
   const lines = Math.min(n, MAX_IP_LINES) + (n > MAX_IP_LINES ? 1 : 0);
-  return def.size.height + lines * LINE;
+  return def.size.height + (lines + detailLines(node.data.props).length) * LINE + (hasBadges(node.data.props) ? BADGE_ROW : 0);
+}
+
+/**
+ * Height of the header of a host (hypervisor, Docker host): one line per
+ * displayed address or service detail, so addresses are stacked, not inlined.
+ */
+export function headerHeight(node: InfraNode): number {
+  const def = getDefinition(node.data.type);
+  if (def.renderer === 'zone') return 44;
+  if (def.renderer !== 'container') return 0;
+  const n = shownExtraIps(node.data.props).length;
+  const lines = Math.min(n, MAX_IP_LINES) + (n > MAX_IP_LINES ? 1 : 0) + detailLines(node.data.props).length;
+  return 48 + lines * LINE;
+}
+
+/* Compact view of hosts --------------------------------------------- */
+
+/** Height of a guest drawn as a single line in a compact host. */
+export const COMPACT_ROW = 30;
+/** Header of a host drawn inside a compact host (e.g. a Docker host in Proxmox). */
+export const COMPACT_HEADER = 30;
+/** Default width of a host switched to compact view. */
+export const COMPACT_WIDTH = 440;
+
+export const isCompactHost = (n: InfraNode | undefined): boolean => !!n && n.data.props.compact === true;
+
+/** Is this node inside a host shown in compact view (at any depth)? */
+export function inCompactHost(node: InfraNode, byId: Map<string, InfraNode>): boolean {
+  let p = node.parentId ? byId.get(node.parentId) : undefined;
+  let guard = 0;
+  while (p && guard++ < 50) {
+    if (isCompactHost(p)) return true;
+    p = p.parentId ? byId.get(p.parentId) : undefined;
+  }
+  return false;
+}
+
+/** Outermost compact host containing (or being) this node. */
+export function compactRoot(nodeId: string, byId: Map<string, InfraNode>): InfraNode | undefined {
+  let cur = byId.get(nodeId);
+  let found: InfraNode | undefined;
+  let guard = 0;
+  while (cur && guard++ < 50) {
+    if (isCompactHost(cur)) found = cur;
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  return found;
+}
+
+/** Top offset of the children of a container. */
+export function childTop(node: InfraNode, compactRow = false): number {
+  if (compactRow) return COMPACT_HEADER + 4;
+  return headerHeight(node) + (isCompactHost(node) ? 8 : 12);
 }
 
 /** Adjust a device's height after its address list changed. */
@@ -45,4 +110,9 @@ export function hasVpn(node: InfraNode): boolean {
 
 export function hasHostFirewall(node: InfraNode): boolean {
   return node.data.props.fw === true;
+}
+
+/** Access point: dedicated AP or equipment with integrated Wi-Fi (e.g. a router). */
+export function hasWifi(node: InfraNode): boolean {
+  return getDefinition(node.data.type).role === 'ap' || node.data.props.wifi === true;
 }

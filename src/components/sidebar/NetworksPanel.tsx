@@ -164,7 +164,7 @@ export function NetworksPanel() {
               <span className="text-[10.5px] text-subtle">{counts[String(v.id)] ?? 0}</span>
               <ChevronDown size={14} className={cn('text-subtle transition-transform', open === v.uid && 'rotate-180')} />
             </button>
-            {open === v.uid && <VlanEditor vlan={v} />}
+            {open === v.uid && <VlanEditor key={`${v.uid}-${v.id}`} vlan={v} />}
           </div>
         ))}
       </div>

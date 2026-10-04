@@ -1,8 +1,14 @@
 import { definitionHasField, getDefinition } from '../../data/catalog';
-import type { InfraEdge, InfraNode, ValidationIssue, Vlan } from '../../types';
-import { cidrEquals, ipInCidr, isValidCidr, isValidIPv4, isValidMac, parseCidr } from '../../utils/ip';
+import type { Bond, InfraEdge, InfraNode, NodeRole, ValidationIssue, Vlan } from '../../types';
+import { analyzeBond } from '../connections/bonds';
+import { cidrEquals, cidrOverlaps, ipInCidr, isValidCidr, isValidIPv4, isValidMac, parseCidr, parseIPv4 } from '../../utils/ip';
 import { str } from '../../utils/misc';
-import { extraIps, hasHostFirewall, hasVpn } from '../nodes/ips';
+import { extraIps, hasHostFirewall, hasVpn, hasWifi } from '../nodes/ips';
+import { servicesOf } from '../../data/services';
+import { addressProblem, hasRules, isValidPorts, rulesOf } from '../firewall/rules';
+
+/** Devices that forward Ethernet frames between their ports (can loop). */
+const L2_ROLES = new Set<NodeRole>(['switch', 'core-switch', 'ap', 'bridge', 'hypervisor']);
 
 const ZONE_TYPES = new Set(['vlan-zone', 'subnet', 'network-zone', 'dmz', 'docker-network']);
 
@@ -36,7 +42,7 @@ export function zoneSubnet(zone: InfraNode, vlans: Vlan[]): string {
   return v?.subnet ?? '';
 }
 
-export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: Vlan[]): ValidationIssue[] {
+export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: Vlan[], bonds: Bond[] = []): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const push = (issue: Omit<ValidationIssue, 'id'>) => issues.push({ id: `i${issues.length}`, ...issue });
@@ -109,6 +115,13 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
       if (subnet && ipInCidr(ip, subnet) === false && !(vlan?.subnet && ipInCidr(ip, vlan.subnet)))
         push({ severity: 'warning', message: `${n.data.name}: ${ip} is outside ${zone.data.name} (${subnet})`, nodeIds: [n.id, zone.id] });
     }
+    for (const subnet of [vlan?.subnet, net].filter(Boolean) as string[]) {
+      const c = parseCidr(subnet);
+      const a = parseIPv4(ip);
+      if (!c || a === null || c.prefix >= 31 || ipInCidr(ip, subnet) !== true) continue;
+      if (a === c.network) push({ severity: 'error', message: `${n.data.name}: ${ip} is the network address of ${subnet}`, nodeIds: [n.id] });
+      if (a === (c.network | (~c.mask >>> 0)) >>> 0) push({ severity: 'error', message: `${n.data.name}: ${ip} is the broadcast address of ${subnet}`, nodeIds: [n.id] });
+    }
     const gw = str(n.data.props.gateway);
     const subnetForGw = net || vlan?.subnet;
     if (gw && subnetForGw && ipInCidr(gw, subnetForGw) === false)
@@ -138,12 +151,11 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
   }
   const subnetOwners = vlans.filter((v) => parseCidr(v.subnet));
   for (let i = 0; i < subnetOwners.length; i++)
-    for (let j = i + 1; j < subnetOwners.length; j++)
-      if (cidrEquals(subnetOwners[i].subnet, subnetOwners[j].subnet))
-        push({
-          severity: 'warning',
-          message: `VLAN ${subnetOwners[i].id} and VLAN ${subnetOwners[j].id} share subnet ${subnetOwners[i].subnet}`,
-        });
+    for (let j = i + 1; j < subnetOwners.length; j++) {
+      const [x, y] = [subnetOwners[i], subnetOwners[j]];
+      if (cidrEquals(x.subnet, y.subnet)) push({ severity: 'warning', message: `VLAN ${x.id} and VLAN ${y.id} share subnet ${x.subnet}` });
+      else if (cidrOverlaps(x.subnet, y.subnet)) push({ severity: 'warning', message: `VLAN ${x.id} (${x.subnet}) and VLAN ${y.id} (${y.subnet}) have overlapping subnets` });
+    }
   for (const z of nodes) {
     if (!ZONE_TYPES.has(z.data.type)) continue;
     const vlan = vlanById.get(str(z.data.props.vlan));
@@ -167,16 +179,18 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
     }
     const sp = e.data?.sourcePort;
     const tp = e.data?.targetPort;
-    if (sp) portUse.set(`${s.id}|${sp}`, [...(portUse.get(`${s.id}|${sp}`) ?? []), e.id]);
-    if (tp) portUse.set(`${t.id}|${tp}`, [...(portUse.get(`${t.id}|${tp}`) ?? []), e.id]);
+    // Only a physical port can carry a single cable; tunnels and radios serve many peers.
+    const physicalLink = ['ethernet', 'fiber', 'wan', 'generic', 'vlan'].includes(e.data?.connType ?? 'ethernet');
+    if (sp && physicalLink) portUse.set(`${s.id}|${sp}`, [...(portUse.get(`${s.id}|${sp}`) ?? []), e.id]);
+    if (tp && physicalLink) portUse.set(`${t.id}|${tp}`, [...(portUse.get(`${t.id}|${tp}`) ?? []), e.id]);
     const sd = getDefinition(s.data.type);
     const td = getDefinition(t.data.type);
     const type = e.data?.connType ?? 'ethernet';
     const physical = type === 'ethernet' || type === 'fiber';
     if (physical && (sd.role === 'cloud' || td.role === 'cloud'))
       push({ severity: 'info', message: `${s.data.name} ↔ ${t.data.name}: a cloud is usually reached through a WAN/VPN link`, edgeIds: [e.id] });
-    if (type === 'wifi' && sd.role !== 'ap' && td.role !== 'ap')
-      push({ severity: 'warning', message: `${s.data.name} ↔ ${t.data.name}: Wi-Fi link without an access point`, edgeIds: [e.id] });
+    if (type === 'wifi' && !hasWifi(s) && !hasWifi(t))
+      push({ severity: 'warning', message: `${s.data.name} ↔ ${t.data.name}: Wi-Fi link without an access point (enable “Integrated Wi-Fi AP” on a router)`, edgeIds: [e.id] });
     if (physical && (ancestors(s, byId).some((a) => a.id === t.id) || ancestors(t, byId).some((a) => a.id === s.id)))
       push({ severity: 'info', message: `${s.data.name} ↔ ${t.data.name}: physical link between a host and its own guest`, edgeIds: [e.id] });
     if (type === 'vpn') {
@@ -199,6 +213,46 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
     if (e.data?.mode === 'access' && vlan && vlan.split(/[\s,]+/).filter(Boolean).length > 1)
       push({ severity: 'warning', message: `Access port ${s.data.name} ↔ ${t.data.name} carries several VLANs (use trunk)`, edgeIds: [e.id] });
   }
+  // --- Bonds / aggregates ----------------------------------------------
+  for (const bond of bonds) {
+    const analysis = analyzeBond(bond, edges, nodes);
+    if (!analysis.members.length) continue;
+    const memberIds = analysis.members.map((e) => e.id);
+    for (const p of analysis.problems) push({ severity: p.severity, message: p.message, edgeIds: memberIds });
+  }
+  // Parallel links that are not grouped: a loop only between two L2-forwarding devices.
+  const pairs = new Map<string, InfraEdge[]>();
+  for (const e of edges) {
+    if (!['ethernet', 'fiber'].includes(e.data?.connType ?? 'ethernet') || e.data?.bondId) continue;
+    const k = [e.source, e.target].sort().join('|');
+    pairs.set(k, [...(pairs.get(k) ?? []), e]);
+  }
+  for (const group of pairs.values()) {
+    if (group.length < 2) continue;
+    const s = byId.get(group[0].source);
+    const t = byId.get(group[0].target);
+    if (!s || !t) continue;
+    const label = `${s.data.name} ↔ ${t.data.name}`;
+    const bridging = [s, t].every((n) => L2_ROLES.has(getDefinition(n.data.type).role));
+    push(
+      bridging
+        ? { severity: 'warning', message: `${label}: ${group.length} parallel links without bond — a switching loop unless STP blocks them (create a bond)`, edgeIds: group.map((e) => e.id) }
+        : { severity: 'info', message: `${label}: ${group.length} parallel links are not grouped — create a bond or a multipath group to document the redundancy`, edgeIds: group.map((e) => e.id) },
+    );
+  }
+
+  // --- Redundancy groups (stack / MLAG / HA) ----------------------------
+  const groups = new Map<string, InfraNode[]>();
+  for (const n of nodes) {
+    const g = str(n.data.props.redundancyGroup).trim();
+    if (g) groups.set(g, [...(groups.get(g) ?? []), n]);
+  }
+  for (const [g, members] of groups) {
+    if (members.length === 1) push({ severity: 'info', message: `Redundancy group “${g}” has a single device (${members[0].data.name})`, nodeIds: [members[0].id] });
+    const roles = new Set(members.map((m) => getDefinition(m.data.type).role));
+    if (roles.size > 1) push({ severity: 'warning', message: `Redundancy group “${g}” mixes different kinds of equipment (${members.map((m) => m.data.name).join(', ')})`, nodeIds: members.map((m) => m.id) });
+  }
+
   for (const [key, ids] of portUse) {
     if (ids.length < 2) continue;
     const [nodeId, port] = key.split('|');
@@ -221,8 +275,66 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
     if (n.data.props.vpn !== true) continue;
     const tunnel = str(n.data.props.vpnNetwork);
     if (!tunnel) continue;
-    const clash = vlans.find((v) => v.subnet && cidrEquals(v.subnet, tunnel));
+    const clash = vlans.find((v) => v.subnet && cidrOverlaps(v.subnet, tunnel));
     if (clash) push({ severity: 'warning', message: `${n.data.name}: VPN tunnel network ${tunnel} overlaps VLAN ${clash.id}`, nodeIds: [n.id] });
+  }
+
+  // --- VPN tunnel addresses --------------------------------------------
+  for (const n of nodes) {
+    if (n.data.props.vpn !== true) continue;
+    const ip = str(n.data.props.vpnIp);
+    const net = str(n.data.props.vpnNetwork);
+    if (ip && isValidIPv4(ip) && net && ipInCidr(ip, net) === false)
+      push({ severity: 'warning', message: `${n.data.name}: tunnel IP ${ip} is outside tunnel network ${net}`, nodeIds: [n.id] });
+  }
+  const tunnelOwners = new Map<string, InfraNode[]>();
+  for (const n of nodes) {
+    const ip = n.data.props.vpn === true ? str(n.data.props.vpnIp) : '';
+    if (isValidIPv4(ip)) tunnelOwners.set(ip, [...(tunnelOwners.get(ip) ?? []), n]);
+  }
+  for (const [ip, owners] of tunnelOwners)
+    if (owners.length > 1)
+      push({ severity: 'error', message: `Tunnel IP ${ip} is used by ${owners.map((o) => o.data.name).join(', ')}`, nodeIds: owners.map((o) => o.id) });
+
+  // --- Several DHCP servers on one VLAN --------------------------------
+  const dhcpByVlan = new Map<string, InfraNode[]>();
+  for (const n of nodes) {
+    const isDhcp = n.data.type === 'dhcp-server' || servicesOf(n.data.props).includes('dhcp');
+    const vlan = str(n.data.props.vlan);
+    if (isDhcp && vlan) dhcpByVlan.set(vlan, [...(dhcpByVlan.get(vlan) ?? []), n]);
+  }
+  for (const [vlan, servers] of dhcpByVlan)
+    if (servers.length > 1)
+      push({
+        severity: 'warning',
+        message: `VLAN ${vlan} has ${servers.length} DHCP servers (${servers.map((x) => x.data.name).join(', ')}) — make sure scopes do not overlap`,
+        nodeIds: servers.map((x) => x.id),
+      });
+
+  // --- Firewall rules ----------------------------------------------------
+  for (const n of nodes) {
+    if (!hasRules(n)) continue;
+    rulesOf(n.data.props).forEach((r, i) => {
+      if (!r.enabled) return;
+      const where = `${n.data.name} rule #${i + 1}`;
+      const src = addressProblem(r.source);
+      const dst = addressProblem(r.destination);
+      if (src) push({ severity: 'error', message: `${where}: source — ${src}`, nodeIds: [n.id] });
+      if (dst) push({ severity: 'error', message: `${where}: destination — ${dst}`, nodeIds: [n.id] });
+      if ((r.protocol === 'tcp' || r.protocol === 'udp' || r.protocol === 'tcp/udp') && !isValidPorts(r.ports))
+        push({ severity: 'error', message: `${where}: invalid ports "${r.ports}"`, nodeIds: [n.id] });
+    });
+    const rules = rulesOf(n.data.props).filter((r) => r.enabled);
+    const catchAll = rules.findIndex((r) => r.source.trim() === 'any' && r.destination.trim() === 'any' && r.protocol === 'any' && r.direction !== 'out');
+    if (catchAll >= 0 && catchAll < rules.length - 1)
+      push({ severity: 'warning', message: `${n.data.name}: rule #${catchAll + 1} matches everything — the rules after it are never used`, nodeIds: [n.id] });
+  }
+
+  // --- Annotations referring to deleted equipment ---------------------
+  for (const n of nodes) {
+    const scope = str(n.data.props.scope);
+    if (n.data.type === 'fw-table' && scope && scope !== 'all' && !byId.has(scope))
+      push({ severity: 'warning', message: `“${str(n.data.props.text) || 'Firewall rules'}” table refers to deleted equipment`, nodeIds: [n.id] });
   }
 
   // --- Isolated equipment ----------------------------------------------

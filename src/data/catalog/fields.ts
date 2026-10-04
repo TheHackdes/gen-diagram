@@ -94,6 +94,7 @@ export const VPN_FIELDS: FieldDef[] = [
   { key: 'vpn', label: 'Integrated VPN gateway', type: 'boolean', section: 'vpn' },
   { key: 'vpnProtocol', label: 'Protocol', type: 'select', options: opts(['WireGuard', 'IPsec', 'OpenVPN', 'SSL VPN', 'L2TP/IPsec']), section: 'vpn', showIf: 'vpn' },
   { key: 'vpnMode', label: 'Mode', type: 'select', options: opts(['Site-to-site', 'Remote access', 'Site-to-site + remote access']), section: 'vpn', showIf: 'vpn' },
+  { key: 'vpnIp', label: 'Tunnel IP (this device)', type: 'ip', placeholder: '10.99.0.1', section: 'vpn', showIf: 'vpn' },
   { key: 'vpnEndpoint', label: 'Public endpoint', type: 'text', placeholder: 'vpn.example.com or 203.0.113.10', mono: true, section: 'vpn', showIf: 'vpn' },
   { key: 'vpnNetwork', label: 'Tunnel network', type: 'cidr', placeholder: '10.99.0.0/24', section: 'vpn', showIf: 'vpn' },
   { key: 'vpnPeers', label: 'Peers / notes', type: 'textarea', placeholder: 'branch-rtr-01, road warriors', section: 'vpn', showIf: 'vpn' },
@@ -106,5 +107,23 @@ export const FIREWALL_FIELDS: FieldDef[] = [
   { key: 'fw', label: 'Host firewall', type: 'boolean', section: 'firewall' },
   { key: 'fwProduct', label: 'Product', type: 'select', options: opts(HOST_FIREWALL_PRODUCTS), section: 'firewall', showIf: 'fw' },
   { key: 'fwPolicy', label: 'Inbound policy', type: 'select', options: opts(['Default deny', 'Default allow', 'Custom']), section: 'firewall', showIf: 'fw' },
-  { key: 'fwRules', label: 'Rules', type: 'textarea', placeholder: 'allow tcp/22 from 192.168.10.0/24\nallow tcp/443 from any', mono: true, section: 'firewall', showIf: 'fw' },
 ];
+
+/** Integrated Wi-Fi access point (e.g. a router with built-in Wi-Fi). */
+export const WIFI_FIELDS: FieldDef[] = [
+  { key: 'wifi', label: 'Integrated Wi-Fi access point', type: 'boolean', section: 'wifi' },
+  { key: 'ssid', label: 'SSID(s)', type: 'text', placeholder: 'Corp, Guest', section: 'wifi', showIf: 'wifi' },
+  { key: 'band', label: 'Band', type: 'select', options: opts(['2.4 GHz', '5 GHz', '6 GHz', 'Dual band', 'Tri band']), section: 'wifi', showIf: 'wifi' },
+  { key: 'wifiStandard', label: 'Standard', type: 'select', options: opts(['Wi-Fi 5 (ac)', 'Wi-Fi 6 (ax)', 'Wi-Fi 6E', 'Wi-Fi 7 (be)']), section: 'wifi', showIf: 'wifi' },
+  { key: 'wifiSecurity', label: 'Security', type: 'select', options: opts(['WPA2-Personal', 'WPA3-Personal', 'WPA2-Enterprise', 'WPA3-Enterprise', 'Open']), section: 'wifi', showIf: 'wifi' },
+];
+
+/** Devices of one stack / MLAG / vPC pair / HA cluster act as one logical device. */
+export const REDUNDANCY_GROUP_FIELD: FieldDef = {
+  key: 'redundancyGroup',
+  label: 'Redundancy group',
+  type: 'text',
+  placeholder: 'stack-1, vpc-core, fw-ha…',
+  help: 'Stack, MLAG / vPC pair or HA cluster. Devices with the same group act as one for bonds.',
+  mono: true,
+};

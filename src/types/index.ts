@@ -34,7 +34,8 @@ export type NodeRenderer =
   | 'note'
   | 'legend'
   | 'separator'
-  | 'arrow';
+  | 'arrow'
+  | 'rulesTable';
 
 /** Semantic role, used by smart suggestions, layout and validation. */
 export type NodeRole =
@@ -74,6 +75,7 @@ export type FieldType =
   | 'os'
   | 'ports'
   | 'ipList'
+  | 'nodeRef'
   | 'color'
   | 'boolean';
 
@@ -99,7 +101,7 @@ export interface FieldDef {
 }
 
 /** Services a device can run in addition to its main role. */
-export type Capability = 'vpn' | 'firewall';
+export type Capability = 'vpn' | 'firewall' | 'wifi';
 
 /** Additional address of a multi-homed node (props.ips). */
 export interface IpEntry {
@@ -107,6 +109,25 @@ export interface IpEntry {
   /** Interface or purpose, e.g. "eth1", "mgmt", "backup". */
   label?: string;
   vlan?: string;
+  /** Displayed on the diagram (default true). */
+  show?: boolean;
+}
+
+export type RuleAction = 'allow' | 'deny';
+export type RuleDirection = 'in' | 'out' | 'forward';
+export type RuleProtocol = 'any' | 'tcp' | 'udp' | 'tcp/udp' | 'icmp';
+
+/** One firewall rule: who can reach what, on which protocol and ports. */
+export interface FirewallRule {
+  id: string;
+  action: RuleAction;
+  direction: RuleDirection;
+  source: string;
+  destination: string;
+  protocol: RuleProtocol;
+  ports: string;
+  comment?: string;
+  enabled: boolean;
 }
 
 export interface ComponentDefinition {
@@ -217,6 +238,37 @@ export interface InfraEdgeData extends Record<string, unknown> {
   vlan?: string;
   mode?: '' | 'access' | 'trunk';
   description?: string;
+  /** Aggregate / redundancy group this link belongs to (Bond.id). */
+  bondId?: string;
+  /** @deprecated v1.3 format (bond grouped by device pair) — migrated to `bondId`. */
+  bond?: string;
+  /** @deprecated v1.3 format — migrated to Bond.mode. */
+  bondMode?: string;
+}
+
+export type BondModeId =
+  | 'lacp'
+  | 'static'
+  | 'balance-rr'
+  | 'balance-alb'
+  | 'balance-tlb'
+  | 'active-backup'
+  | 'multipath'
+  | 'redundancy';
+
+/**
+ * A link aggregate (bond, port-channel, LAG) or redundancy group. Its member
+ * links may join different devices: a server bonded to two switches of an
+ * MLAG pair, two stacks linked back to back (vPC), multipath storage…
+ */
+export interface Bond {
+  id: string;
+  /** Name on the first side, e.g. "bond0". */
+  name: string;
+  /** Name on the other side, e.g. "Po10" on the switch. */
+  peerName?: string;
+  mode: BondModeId;
+  description?: string;
 }
 
 export type InfraNode = Node<InfraNodeData, NodeRenderer>;
@@ -260,6 +312,7 @@ export interface ProjectFile {
   annotations: InfraNode[];
   connections: InfraEdge[];
   vlans: Vlan[];
+  bonds?: Bond[];
   customOperatingSystems?: OperatingSystem[];
   settings: ProjectSettings;
   viewport?: Viewport;

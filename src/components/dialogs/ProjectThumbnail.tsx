@@ -1,9 +1,12 @@
 import { colorOf, getDefinition, hasDefinition } from '../../data/catalog';
 import type { ProjectSummary } from '../../features/projects/storage';
 
-export function ProjectThumbnail({ preview }: { preview: ProjectSummary['preview'] }) {
+export function ProjectThumbnail({ preview, links = [] }: { preview: ProjectSummary['preview']; links?: number[][] }) {
   return (
     <svg viewBox="-0.05 -0.05 1.1 1.1" className="h-full w-full" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      {links.map(([x1, y1, x2, y2], i) => (
+        <line key={`l${i}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#94a3b8" strokeOpacity={0.55} strokeWidth={0.004} />
+      ))}
       {preview.map((r, i) => {
         const def = r.c && hasDefinition(r.c) ? getDefinition(r.c) : undefined;
         const color = def ? colorOf(def) : '#94a3b8';

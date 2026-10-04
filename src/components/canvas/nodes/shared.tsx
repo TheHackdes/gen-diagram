@@ -1,8 +1,10 @@
 import { Handle, NodeResizer, Position, useConnection } from '@xyflow/react';
-import { KeyRound, ShieldCheck } from 'lucide-react';
+import { KeyRound, ShieldCheck, Wifi } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { getOperatingSystem } from '../../../data/operatingSystems';
-import { extraIps, MAX_IP_LINES } from '../../../features/nodes/ips';
+import { SERVICE_BY_ID, servicesOf } from '../../../data/services';
+import { detailLines } from '../../../features/nodes/details';
+import { MAX_IP_LINES, shownExtraIps } from '../../../features/nodes/ips';
 import { useDiagram } from '../../../store/diagramStore';
 import type { Vlan } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
@@ -27,12 +29,15 @@ export function NodeHandles({ nodeId, connectable = true }: { nodeId: string; co
 
 export function Resizer({ id, selected, minWidth = 120, minHeight = 40, locked }: { id: string; selected?: boolean; minWidth?: number; minHeight?: number; locked?: boolean }) {
   const checkpoint = useDiagram((s) => s.checkpoint);
+  const refreshCompact = useDiagram((s) => s.refreshCompact);
   return (
     <NodeResizer
       isVisible={!!selected && !locked}
       minWidth={minWidth}
       minHeight={minHeight}
       onResizeStart={() => checkpoint(`resize:${id}`)}
+      // Lines of a compact host stretch to its new width.
+      onResizeEnd={() => refreshCompact([id])}
       lineClassName="no-export"
     />
   );
@@ -163,41 +168,52 @@ export function IconTile({ icon, color, size = 36, osIcon, osColor }: { icon: st
   );
 }
 
-/** Small badges for services running on the equipment itself. */
-export function CapabilityBadges({ props }: { props: Record<string, unknown> }) {
-  const fw = props.fw === true;
-  const vpn = props.vpn === true;
-  if (!fw && !vpn) return null;
+const CAPABILITY_BADGES = [
+  { key: 'vpn', label: 'VPN', color: '#059669', icon: <KeyRound size={9} strokeWidth={2.5} />, title: (p: Record<string, unknown>) => ['Integrated VPN', str(p.vpnProtocol), str(p.vpnMode)].filter(Boolean).join(' · ') },
+  { key: 'fw', label: 'FW', color: '#dc2626', icon: <ShieldCheck size={9} strokeWidth={2.5} />, title: (p: Record<string, unknown>) => ['Host firewall', str(p.fwProduct), str(p.fwPolicy)].filter(Boolean).join(' · ') },
+  { key: 'wifi', label: 'Wi-Fi', color: '#0ea5e9', icon: <Wifi size={9} strokeWidth={2.5} />, title: (p: Record<string, unknown>) => ['Integrated Wi-Fi AP', str(p.ssid)].filter(Boolean).join(' · ') },
+];
+
+function Badge({ color, title, icon, label }: { color: string; title: string; icon: React.ReactNode; label: string }) {
+  return (
+    <span className="inline-flex h-4 shrink-0 items-center gap-0.5 rounded px-1 text-[9.5px] font-bold whitespace-nowrap" style={{ background: alpha(color, 0.13), color }} title={title}>
+      {icon}
+      {label}
+    </span>
+  );
+}
+
+/** Integrated services (VPN, FW, Wi-Fi) and extra roles (DHCP, DNS…) of the equipment. */
+export function CapabilityBadges({ props, max = Infinity }: { props: Record<string, unknown>; max?: number }) {
+  const badges = [
+    ...CAPABILITY_BADGES.filter((c) => props[c.key] === true).map((c) => ({ key: c.key, color: c.color, title: c.title(props), icon: c.icon, label: c.label })),
+    ...servicesOf(props).map((id) => {
+      const sv = SERVICE_BY_ID.get(id)!;
+      return { key: sv.id, color: sv.color, title: sv.label, icon: <Icon name={sv.icon} size={9} strokeWidth={2.5} />, label: sv.short };
+    }),
+  ];
+  if (!badges.length) return null;
+  // Keep one row: overflow collapses into "+N" with the full list as tooltip.
+  const visible = badges.length > max ? badges.slice(0, max - 1) : badges;
+  const hidden = badges.slice(visible.length);
   return (
     <>
-      {vpn && (
-        <span
-          className="inline-flex h-4 shrink-0 items-center gap-0.5 rounded px-1 text-[9.5px] font-bold"
-          style={{ background: alpha('#059669', 0.13), color: '#059669' }}
-          title={`Integrated VPN${str(props.vpnProtocol) ? ` · ${str(props.vpnProtocol)}` : ''}${str(props.vpnMode) ? ` · ${str(props.vpnMode)}` : ''}`}
-        >
-          <KeyRound size={9} strokeWidth={2.5} />
-          VPN
-        </span>
-      )}
-      {fw && (
-        <span
-          className="inline-flex h-4 shrink-0 items-center gap-0.5 rounded px-1 text-[9.5px] font-bold"
-          style={{ background: alpha('#dc2626', 0.12), color: '#dc2626' }}
-          title={`Host firewall${str(props.fwProduct) ? ` · ${str(props.fwProduct)}` : ''}${str(props.fwPolicy) ? ` · ${str(props.fwPolicy)}` : ''}`}
-        >
-          <ShieldCheck size={9} strokeWidth={2.5} />
-          FW
+      {visible.map((b) => (
+        <Badge key={b.key} color={b.color} title={b.title} icon={b.icon} label={b.label} />
+      ))}
+      {hidden.length > 0 && (
+        <span className="inline-flex h-4 shrink-0 items-center rounded bg-surface-2 px-1 text-[9.5px] font-bold text-muted" title={hidden.map((b) => b.title).join('\n')}>
+          +{hidden.length}
         </span>
       )}
     </>
   );
 }
 
-/** Additional addresses listed under the main IP of a card. */
+/** Additional addresses (only those marked as shown) listed under the main IP. */
 export function ExtraIpLines({ props }: { props: Record<string, unknown> }) {
   const vlans = useDiagram((s) => s.vlans);
-  const ips = extraIps(props);
+  const ips = shownExtraIps(props);
   if (!ips.length) return null;
   const shown = ips.slice(0, MAX_IP_LINES);
   return (
@@ -213,6 +229,22 @@ export function ExtraIpLines({ props }: { props: Record<string, unknown> }) {
         );
       })}
       {ips.length > MAX_IP_LINES && <span className="block h-[14px] text-[10px] leading-[14px] text-subtle">+{ips.length - MAX_IP_LINES} more</span>}
+    </>
+  );
+}
+
+/** Details of integrated services the user chose to display (tunnel IP, SSID…). */
+export function DetailLines({ props }: { props: Record<string, unknown> }) {
+  const lines = detailLines(props);
+  if (!lines.length) return null;
+  return (
+    <>
+      {lines.map((l) => (
+        <span key={l.key} className={cn('flex h-[14px] min-w-0 items-center gap-1 leading-none', l.mono ? 'font-mono text-[10.5px]' : 'text-[10.5px]')} style={{ color: l.color }}>
+          {l.capability === 'vpn' ? <KeyRound size={9} className="shrink-0" /> : <Wifi size={9} className="shrink-0" />}
+          <span className="truncate">{l.text}</span>
+        </span>
+      ))}
     </>
   );
 }

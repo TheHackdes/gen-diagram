@@ -56,7 +56,9 @@ function nextFreeIp(ip: string, used: Set<string>): string {
 }
 
 export function usedIps(nodes: InfraNode[]): Set<string> {
-  return new Set(nodes.flatMap((n) => allIps(n.data.props).map((e) => e.address)).filter(Boolean));
+  return new Set(
+    nodes.flatMap((n) => [...allIps(n.data.props).map((e) => e.address), n.data.props.vpn === true ? str(n.data.props.vpnIp) : '']).filter(Boolean),
+  );
 }
 
 /** First free address of a subnet starting at host .10 (for suggestions). */
@@ -105,6 +107,17 @@ export function pasteClipboard(
       props.ip = nextFreeIp(ip, ips);
     }
     if (str(props.ip)) ips.add(str(props.ip));
+    if (Array.isArray(props.ips)) {
+      props.ips = (props.ips as { address?: string }[]).map((e) => {
+        if (!e?.address || !ips.has(e.address)) return e;
+        const address = nextFreeIp(e.address, ips);
+        ips.add(address);
+        return { ...e, address };
+      });
+    }
+    const tunnel = str(props.vpnIp);
+    if (tunnel && ips.has(tunnel)) props.vpnIp = nextFreeIp(tunnel, ips);
+    if (str(props.vpnIp)) ips.add(str(props.vpnIp));
 
     let position = n.position;
     let parentId = n.parentId ? idMap.get(n.parentId) : undefined;

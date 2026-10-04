@@ -42,7 +42,7 @@ function ZoneNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
           <EditableName
             id={id}
             value={data.name}
-            className={cn('font-semibold tracking-wide uppercase', isGroup ? 'text-[11px]' : 'text-[12px]')}
+            className={cn('font-semibold', isGroup ? 'text-[12px]' : 'text-[13px]')}
           />
         </span>
         {subnet && <span className="shrink-0 font-mono text-[11px] text-muted">{subnet}</span>}

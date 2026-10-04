@@ -2,7 +2,7 @@ import type { Capability, ComponentDefinition, FieldDef, LibraryPreset, NodeRole
 import { CATEGORY_BY_ID } from '../categories';
 import { getAllOperatingSystems } from '../operatingSystems';
 import { ANNOTATIONS } from './annotations';
-import { FIREWALL_FIELDS, IP_LIST_FIELD, VPN_FIELDS } from './fields';
+import { FIREWALL_FIELDS, IP_LIST_FIELD, REDUNDANCY_GROUP_FIELD, VPN_FIELDS, WIFI_FIELDS } from './fields';
 import { GENERIC, LOGICAL } from './logicalGeneric';
 import { NETWORK_DEVICES } from './networkDevices';
 import { SERVERS } from './servers';
@@ -28,8 +28,8 @@ const BASE_DEFINITIONS: ComponentDefinition[] = [
 
 /** Integrated services available by default for each role (a definition can override them). */
 const DEFAULT_CAPABILITIES: Partial<Record<NodeRole, Capability[]>> = {
-  router: ['vpn', 'firewall'],
-  firewall: ['vpn'],
+  router: ['vpn', 'firewall', 'wifi'],
+  firewall: ['vpn', 'wifi'],
   server: ['firewall'],
   security: ['firewall'],
   hypervisor: ['firewall'],
@@ -39,7 +39,10 @@ const DEFAULT_CAPABILITIES: Partial<Record<NodeRole, Capability[]>> = {
   endpoint: ['firewall'],
 };
 
-const CAPABILITY_FIELDS: Record<Capability, FieldDef[]> = { vpn: VPN_FIELDS, firewall: FIREWALL_FIELDS };
+/** Equipment that can be stacked / paired (MLAG, vPC, HA). */
+const REDUNDANT_ROLES = new Set<NodeRole>(['switch', 'core-switch', 'router', 'firewall', 'load-balancer']);
+
+const CAPABILITY_FIELDS: Record<Capability, FieldDef[]> = { vpn: VPN_FIELDS, firewall: FIREWALL_FIELDS, wifi: WIFI_FIELDS };
 
 /**
  * Every addressable node gets a list of additional IPs right after its main
@@ -49,6 +52,10 @@ function enrich(def: ComponentDefinition): ComponentDefinition {
   const ipIndex = def.fields.findIndex((f) => f.key === 'ip');
   if (ipIndex < 0) return def;
   const fields = [...def.fields.slice(0, ipIndex + 1), IP_LIST_FIELD, ...def.fields.slice(ipIndex + 1)];
+  if (REDUNDANT_ROLES.has(def.role)) {
+    const vlanIndex = fields.findIndex((f) => f.key === 'vlan');
+    fields.splice(vlanIndex >= 0 ? vlanIndex + 1 : fields.length, 0, REDUNDANCY_GROUP_FIELD);
+  }
   const capabilities = def.capabilities ?? DEFAULT_CAPABILITIES[def.role] ?? [];
   for (const c of capabilities) fields.push(...CAPABILITY_FIELDS[c]);
   return { ...def, fields, capabilities };

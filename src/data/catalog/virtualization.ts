@@ -95,7 +95,8 @@ export const DOCKER_CONTAINER_FIELDS: FieldDef[] = [
 
 export const VIRTUALIZATION: ComponentDefinition[] = [
   hypervisor('proxmox', 'Proxmox VE', 'brand:proxmox', '#E57000', 'Proxmox Virtual Environment node (KVM + LXC).', '8.4'),
-  hypervisor('esxi', 'VMware ESXi', 'brand:vmware', '#607078', 'VMware ESXi host.', '8.0 U3', {
+  // The VMware mark is a wordmark, unreadable at icon size: use a server glyph in VMware grey-blue.
+  hypervisor('esxi', 'VMware ESXi', 'rack-server', '#4d6b80', 'VMware ESXi host.', '8.0 U3', {
     accepts: ['vm', 'docker-host', 'bridge', 'storage'],
     quickAdd: ['vm', 'docker-host', 'bridge', 'storage'],
     keywords: ['vsphere', 'vcenter', 'vmware'],
@@ -200,6 +201,8 @@ export const VIRTUALIZATION: ComponentDefinition[] = [
       F.description,
     ],
     defaults: { driver: 'bridge' },
+    // A Docker network only holds containers.
+    accepts: ['docker-container'],
     size: { width: 360, height: 160 },
   }),
   device({

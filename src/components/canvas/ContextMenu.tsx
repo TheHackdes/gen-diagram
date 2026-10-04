@@ -6,6 +6,9 @@ import {
   Group,
   Lock,
   LockOpen,
+  LayoutGrid,
+  Rows3,
+  Link2,
   LogOut,
   Maximize,
   Plus,
@@ -21,6 +24,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { getDefinition, getPreset } from '../../data/catalog';
 import { fitDiagram } from '../../features/canvas/flowApi';
+import { parallelEdges } from '../../features/connections/parallel';
 import { useDiagram } from '../../store/diagramStore';
 import { useUi } from '../../store/uiStore';
 import { modKey } from '../../utils/misc';
@@ -75,6 +79,10 @@ export function ContextMenu() {
         'separator',
         { id: 'group', label: 'Group selection', icon: <Group size={14} />, shortcut: `${modKey}G`, onSelect: () => (st.select(ids), st.groupSelection()) },
       );
+      if (def.kind === 'container' && st.nodes.some((n) => n.parentId === node.id)) {
+        const compact = node.data.props.compact === true;
+        items.push({ id: 'compact', label: compact ? 'Show guests as cards' : 'Compact view', icon: compact ? <LayoutGrid size={14} /> : <Rows3 size={14} />, onSelect: () => st.setCompact(node.id, !compact) });
+      }
       if (def.accepts && st.nodes.some((n) => n.parentId === node.id)) {
         items.push({ id: 'ungroup', label: def.type === 'group' ? 'Ungroup' : 'Release children', icon: <Ungroup size={14} />, shortcut: `${modKey}⇧G`, onSelect: () => st.ungroup(node.id) });
       }
@@ -98,6 +106,22 @@ export function ContextMenu() {
   } else if (menu.edgeId) {
     const edgeId = menu.edgeId;
     items.push(
+      { id: 'parallel', label: 'Add parallel link', icon: <Plus size={14} />, onSelect: () => st.addParallelLink(edgeId) },
+      (() => {
+        const edge = st.edges.find((e) => e.id === edgeId);
+        const inBond = !!edge?.data?.bondId;
+        return inBond
+          ? { id: 'unbond', label: 'Remove from bond', icon: <Link2 size={14} />, onSelect: () => st.removeFromBond([edgeId]) }
+          : {
+              id: 'bond',
+              label: 'Create bond',
+              icon: <Link2 size={14} />,
+              onSelect: () => {
+                const parallel = edge ? parallelEdges(st.edges, edge).filter((e) => !e.data?.bondId).map((e) => e.id) : [edgeId];
+                st.createBond(parallel.length ? parallel : [edgeId]);
+              },
+            };
+      })(),
       { id: 'reverse', label: 'Reverse direction', icon: <Spline size={14} />, onSelect: () => st.reverseEdge(edgeId) },
       'separator',
       { id: 'delete', label: 'Delete link', icon: <Trash size={14} />, danger: true, onSelect: () => st.deleteElements([], [edgeId]) },

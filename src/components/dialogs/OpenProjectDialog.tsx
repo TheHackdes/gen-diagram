@@ -69,7 +69,7 @@ export function OpenProjectDialog() {
           {projects.map((p) => (
             <li key={p.id} className="flex items-center gap-3 py-2">
               <div className="h-12 w-20 shrink-0 overflow-hidden rounded-md border border-line bg-canvas">
-                <ProjectThumbnail preview={p.preview} />
+                <ProjectThumbnail preview={p.preview} links={p.previewLinks} />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-medium text-fg">

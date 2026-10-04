@@ -1,4 +1,4 @@
-import { Plus, X } from 'lucide-react';
+import { Eye, EyeOff, Plus, X } from 'lucide-react';
 import { extraIps } from '../../features/nodes/ips';
 import { suggestIp } from '../../features/nodes/operations';
 import { useDiagram } from '../../store/diagramStore';
@@ -19,7 +19,7 @@ export function IpListEditor({ node }: { node: InfraNode }) {
     // Suggest an address on a VLAN not used yet by this node.
     const used = new Set([str(node.data.props.vlan), ...rows.map((r) => r.vlan ?? '')]);
     const vlan = vlans.find((v) => !used.has(String(v.id)) && v.subnet);
-    write([...rows, { address: vlan?.subnet ? suggestIp(vlan.subnet, nodes) : '', label: `eth${rows.length + 1}`, vlan: vlan ? String(vlan.id) : '' }]);
+    write([...rows, { address: vlan?.subnet ? suggestIp(vlan.subnet, nodes) : '', label: `eth${rows.length + 1}`, vlan: vlan ? String(vlan.id) : '', show: true }]);
   };
 
   return (
@@ -40,11 +40,21 @@ export function IpListEditor({ node }: { node: InfraNode }) {
                 value={r.address}
                 onChange={(e) => set({ address: e.target.value })}
               />
+              <button
+                type="button"
+                aria-label={r.show !== false ? 'Hide on diagram' : 'Show on diagram'}
+                aria-pressed={r.show !== false}
+                title={r.show !== false ? 'Shown on the diagram — click to hide' : 'Hidden on the diagram — click to show'}
+                onClick={() => set({ show: r.show === false })}
+                className={r.show !== false ? 'rounded p-1 text-primary' : 'rounded p-1 text-subtle hover:text-fg'}
+              >
+                {r.show !== false ? <Eye size={13} /> : <EyeOff size={13} />}
+              </button>
               <button type="button" aria-label="Remove address" onClick={() => write(rows.filter((_, j) => j !== i))} className="rounded p-1 text-subtle hover:text-danger">
                 <X size={13} />
               </button>
             </div>
-            <div className="mt-1.5 grid grid-cols-[1fr_1.3fr] gap-1.5 pr-6">
+            <div className="mt-1.5 grid grid-cols-[1fr_1.3fr] gap-1.5 pr-12">
               <Input aria-label="Interface / label" placeholder="eth1, mgmt…" value={r.label ?? ''} onChange={(e) => set({ label: e.target.value })} className="h-7 text-[12px]" />
               <Select aria-label="VLAN" value={r.vlan ?? ''} onChange={(e) => set({ vlan: e.target.value })} className="h-7 text-[12px]">
                 <option value="">No VLAN</option>

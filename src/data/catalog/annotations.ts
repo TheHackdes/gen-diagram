@@ -66,6 +66,22 @@ export const ANNOTATIONS: ComponentDefinition[] = [
     size: { width: 290, height: 260 },
   }),
   annotation({
+    type: 'fw-table',
+    label: 'Firewall rules table',
+    renderer: 'rulesTable',
+    icon: 'table',
+    description: 'Table of the firewall rules of one device or of the whole diagram.',
+    keywords: ['firewall', 'rules', 'acl', 'matrix', 'flows', 'table'],
+    fields: [
+      { key: 'text', label: 'Title', type: 'text' },
+      { key: 'scope', label: 'Equipment', type: 'nodeRef' },
+      { key: 'showDisabled', label: 'Include disabled rules', type: 'boolean' },
+      { key: 'dock', label: 'Keep on the right of the diagram', type: 'boolean' },
+    ],
+    defaults: { text: 'Firewall rules', scope: 'all', showDisabled: false, dock: true },
+    size: { width: 720, height: 200 },
+  }),
+  annotation({
     type: 'area',
     label: 'Zone',
     renderer: 'zone',

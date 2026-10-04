@@ -9,6 +9,7 @@ import {
   AlignVerticalDistributeCenter,
   CopyPlus,
   Group,
+  Link2,
   Lock,
   Trash,
 } from 'lucide-react';
@@ -18,13 +19,14 @@ import { modKey } from '../../utils/misc';
 import { Button, IconButton } from '../ui/Button';
 import { Section } from './NodeProperties';
 
-export function MultiProperties({ nodes, edgeCount }: { nodes: InfraNode[]; edgeCount: number }) {
+export function MultiProperties({ nodes, edgeIds }: { nodes: InfraNode[]; edgeIds: string[] }) {
   const st = useDiagram.getState();
+  const edgeCount = edgeIds.length;
   const ids = nodes.map((n) => n.id);
   return (
     <div>
       <div className="border-b border-line px-4 py-4">
-        <div className="text-[11px] font-semibold tracking-wider text-primary uppercase">Selection</div>
+        <div className="text-[12px] font-medium text-muted">Selection</div>
         <div className="text-[15px] font-semibold text-fg">
           {nodes.length} element{nodes.length !== 1 ? 's' : ''}
           {edgeCount > 0 && `, ${edgeCount} link${edgeCount !== 1 ? 's' : ''}`}
@@ -43,6 +45,14 @@ export function MultiProperties({ nodes, edgeCount }: { nodes: InfraNode[]; edge
             <IconButton label="Distribute horizontally" disabled={nodes.length < 3} onClick={() => st.distribute('horizontal')}><AlignHorizontalDistributeCenter size={16} /></IconButton>
             <IconButton label="Distribute vertically" disabled={nodes.length < 3} onClick={() => st.distribute('vertical')}><AlignVerticalDistributeCenter size={16} /></IconButton>
           </div>
+        </Section>
+      )}
+      {edgeIds.length >= 2 && (
+        <Section title="Links">
+          <p className="mb-2 text-[11.5px] leading-snug text-subtle">Selected links can form one bond, even towards different devices (MLAG, stack, vPC).</p>
+          <Button size="sm" variant="primary" icon={<Link2 size={14} />} onClick={() => st.createBond(edgeIds)}>
+            Bond {edgeIds.length} links
+          </Button>
         </Section>
       )}
       <Section title="Actions">

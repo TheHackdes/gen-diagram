@@ -8,6 +8,7 @@ A web app for building professional network and infrastructure diagrams: equipme
 npm install
 npm run dev        # http://localhost:5173
 npm run build      # type-check (strict) + production build in dist/
+npm test           # unit tests of the business rules (Vitest)
 ```
 
 On first launch a complete demo project ("Acme HQ") is created and opened.
@@ -16,6 +17,16 @@ On first launch a complete demo project ("Acme HQ") is created and opened.
 
 - **Multiple IP addresses**: every addressable node has a main IP plus a list of additional addresses (interface label + VLAN), shown on the card, included in validation (format, subnet, duplicates) and IP suggestions.
 - **Integrated services**: routers (and firewalls) can enable an *integrated VPN gateway* (protocol, mode, endpoint, tunnel network); servers, VMs, LXC, hypervisors, Docker hosts and workstations can enable a *host firewall* (nftables, ufw, firewalld, Windows Defender Firewall, pf…). Cards show `VPN` / `FW` badges, links between two VPN-capable devices are detected as tunnels (`wg0`, `ipsec0`, `tun0`), and validation flags tunnels to devices without VPN and DMZ hosts without a host firewall. Capabilities are declared per role in `src/data/catalog/index.ts` and can be overridden per definition (`capabilities`).
+
+- **Integrated Wi-Fi**: routers and firewalls can also be access points (SSID, band, standard, security); links to laptops/phones become Wi-Fi links.
+- **Choose what is displayed**: each additional IP has a show/hide toggle; VPN details (tunnel IP, protocol, mode, public endpoint, tunnel network) and Wi-Fi details (SSID, band…) can be individually displayed on the card.
+- **Multiple roles**: any addressable equipment can also act as DHCP, DNS, NAT, NTP, proxy, directory, file server, backup, monitoring… (`src/data/services.ts`). Shown as badges on cards and in the legend; validation flags several DHCP servers on one VLAN.
+- **Structured firewall rules**: action, direction, source → destination, protocol, ports and comment, with presets (SSH, HTTP/S, RDP, DNS, Ping, Deny all), ordering and validation (bad addresses/ports, rules shadowed by a catch-all). A *Firewall rules table* annotation renders all rules (or those of one device) on the diagram and in exports.
+
+- **Redundant links & bonding**: several links between the same devices are allowed (next free ports suggested). Bonds are first-class objects (`bonds` in the project file): their member links may join **different devices** — a server bonded to the two switches of an MLAG pair, two stacks linked back to back (vPC), etc. The two sides are worked out from the links and from each device's *Redundancy group* (stack / MLAG / vPC / HA). Mode rules follow reality: LACP/static need one device or one redundancy group per side; active-backup and balance-alb/tlb are switch-independent (one host side); multipath and redundant paths accept any combination. Links are drawn without overlaps (spread endpoints, staggered bends), bonds get aggregation marks, labels are placed to avoid collisions, and stacked/HA pairs are laid out side by side. v1.3 projects are migrated automatically.
+- **Compact hosts**: hypervisors and Docker hosts have a *Compact view* (header button, properties panel or right-click): every VM, LXC or container becomes one line with only the essentials (name, type, IP, OS or image, VLAN, services); nested hosts become compact blocks. Drag a line to reorder it; the surrounding zone shrinks to fit.
+- **Firewall rule tables on the right**: rule tables are docked to the right edge of the diagram and follow it as the diagram changes (option *Keep on the right of the diagram* on each table).
+- **Stacked addresses**: additional IPs and service details are listed one per line, on device cards and in host headers (the guests move down automatically).
 
 ## Stack
 

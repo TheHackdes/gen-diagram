@@ -1,6 +1,7 @@
 import type { Viewport } from '@xyflow/react';
 import { getDefinition, hasDefinition } from '../../data/catalog';
 import type {
+  Bond,
   InfraEdge,
   InfraNode,
   OperatingSystem,
@@ -24,6 +25,7 @@ export interface DiagramContent {
   nodes: InfraNode[];
   edges: InfraEdge[];
   vlans: Vlan[];
+  bonds?: Bond[];
   customOs: OperatingSystem[];
   settings: ProjectSettings;
   viewport?: Viewport;
@@ -66,6 +68,7 @@ export function toProjectFile(c: DiagramContent): ProjectFile {
     annotations: pick((n) => kind(n).kind === 'annotation'),
     connections: c.edges.map(cleanEdge),
     vlans: c.vlans,
+    bonds: c.bonds ?? [],
     customOperatingSystems: c.customOs,
     settings: c.settings,
     viewport: c.viewport,
@@ -112,6 +115,7 @@ export function fromProjectFile(raw: unknown): DiagramContent {
     nodes: sortByHierarchy(nodes),
     edges,
     vlans: Array.isArray(f.vlans) ? f.vlans : [],
+    bonds: Array.isArray(f.bonds) ? f.bonds.filter((b) => b && typeof b.id === 'string') : [],
     customOs: Array.isArray(f.customOperatingSystems) ? f.customOperatingSystems : [],
     settings: { ...DEFAULT_SETTINGS, ...(f.settings ?? {}) },
     viewport: f.viewport,

@@ -1,10 +1,12 @@
-import type { InfraEdge, InfraNode, Vlan } from '../../types';
+import type { Bond, InfraEdge, InfraNode, Vlan } from '../../types';
+import { newRule as rule } from '../../features/firewall/rules';
 import { TemplateBuilder, VLAN_COLORS } from './builder';
 
 export interface TemplateResult {
   nodes: InfraNode[];
   edges: InfraEdge[];
   vlans: Vlan[];
+  bonds: Bond[];
 }
 
 export interface TemplateInfo {
@@ -18,7 +20,7 @@ export interface TemplateInfo {
 const [VIOLET, BLUE, GREEN, AMBER, RED, , , SLATE] = VLAN_COLORS;
 
 function blank(): TemplateResult {
-  return { nodes: [], edges: [], vlans: [] };
+  return { nodes: [], edges: [], vlans: [], bonds: [] };
 }
 
 function smallOffice(): TemplateResult {
@@ -66,8 +68,8 @@ function threeTier(): TemplateResult {
   const fw = b.add('firewall', 'fw-01', { ip: '10.0.50.1', product: 'FortiGate', vlan: '50' });
   const dmz = b.vlanZone(50);
   const lb = b.add('load-balancer', 'lb-01', { ip: '10.0.50.5', vip: '10.0.50.100', algorithm: 'Round robin', vlan: '50' }, dmz);
-  const web1 = b.add('web-server', 'web-01', { os: 'ubuntu', osVersion: '24.04', ip: '10.0.50.11', vlan: '50' }, dmz);
-  const web2 = b.add('web-server', 'web-02', { os: 'ubuntu', osVersion: '24.04', ip: '10.0.50.12', vlan: '50' }, dmz);
+  const web1 = b.add('web-server', 'web-01', { os: 'ubuntu', osVersion: '24.04', ip: '10.0.50.11', vlan: '50', fw: true, fwProduct: 'ufw', fwPolicy: 'Default deny' }, dmz);
+  const web2 = b.add('web-server', 'web-02', { os: 'ubuntu', osVersion: '24.04', ip: '10.0.50.12', vlan: '50', fw: true, fwProduct: 'ufw', fwPolicy: 'Default deny' }, dmz);
   const appZ = b.vlanZone(60);
   const app1 = b.add('app-server', 'app-01', { os: 'rhel', osVersion: '9', ip: '10.0.60.11', vlan: '60' }, appZ);
   const app2 = b.add('app-server', 'app-02', { os: 'rhel', osVersion: '9', ip: '10.0.60.12', vlan: '60' }, appZ);
@@ -91,12 +93,12 @@ function enterprise(): TemplateResult {
     .vlan(99, 'Network Management', '10.10.99.0/24', SLATE);
   b.add('title', 'Title', { text: 'Enterprise campus', subtitle: 'Core / distribution / access with server farm and DMZ' });
   const inet = b.add('internet', 'Internet', { isp: 'Tier-1 ISP', bandwidth: '10 Gbps' });
-  const fw1 = b.add('firewall', 'fw-01', { ip: '10.10.99.1', vlan: '99', product: 'Palo Alto PA-3420' });
-  const fw2 = b.add('firewall', 'fw-02', { ip: '10.10.99.3', vlan: '99', product: 'Palo Alto PA-3420' });
-  const core1 = b.add('l3-switch', 'core-01', { ip: '10.10.99.11', vlan: '99', model: 'Nexus 9300' });
-  const core2 = b.add('l3-switch', 'core-02', { ip: '10.10.99.12', vlan: '99', model: 'Nexus 9300' });
-  const dist1 = b.add('l3-switch', 'dist-01', { ip: '10.10.99.21', vlan: '99', model: 'Catalyst 9500' });
-  const dist2 = b.add('l3-switch', 'dist-02', { ip: '10.10.99.22', vlan: '99', model: 'Catalyst 9500' });
+  const fw1 = b.add('firewall', 'fw-01', { ip: '10.10.99.1', vlan: '99', product: 'Palo Alto PA-3420', redundancyGroup: 'fw-ha' });
+  const fw2 = b.add('firewall', 'fw-02', { ip: '10.10.99.3', vlan: '99', product: 'Palo Alto PA-3420', redundancyGroup: 'fw-ha' });
+  const core1 = b.add('l3-switch', 'core-01', { ip: '10.10.99.11', vlan: '99', model: 'Nexus 9300', redundancyGroup: 'vpc-core' });
+  const core2 = b.add('l3-switch', 'core-02', { ip: '10.10.99.12', vlan: '99', model: 'Nexus 9300', redundancyGroup: 'vpc-core' });
+  const dist1 = b.add('l3-switch', 'dist-01', { ip: '10.10.99.21', vlan: '99', model: 'Catalyst 9500', redundancyGroup: 'vss-dist' });
+  const dist2 = b.add('l3-switch', 'dist-02', { ip: '10.10.99.22', vlan: '99', model: 'Catalyst 9500', redundancyGroup: 'vss-dist' });
   const users = b.vlanZone(30);
   const acc1 = b.add('switch', 'acc-01', { ip: '10.10.99.31', vlan: '99' }, users);
   const acc2 = b.add('switch', 'acc-02', { ip: '10.10.99.32', vlan: '99' }, users);
@@ -112,16 +114,20 @@ function enterprise(): TemplateResult {
   b.add('vm', 'erp-db-01', { os: 'rhel', osVersion: '9', ip: '10.10.20.41', vlan: '20' }, esx2);
   const san = b.add('san', 'san-01', { ip: '10.10.20.100', vlan: '20', capacity: '200 TB', protocols: 'iSCSI, FC' }, farm);
   const dmz = b.vlanZone(50);
-  const rp = b.add('reverse-proxy', 'rproxy-01', { os: 'debian', osVersion: '13', ip: '172.16.50.10', vlan: '50' }, dmz);
-  const web = b.add('web-server', 'web-01', { os: 'ubuntu', osVersion: '24.04', ip: '172.16.50.20', vlan: '50' }, dmz);
+  const rp = b.add('reverse-proxy', 'rproxy-01', { os: 'debian', osVersion: '13', ip: '172.16.50.10', vlan: '50', fw: true, fwProduct: 'nftables', fwPolicy: 'Default deny' }, dmz);
+  const web = b.add('web-server', 'web-01', { os: 'ubuntu', osVersion: '24.04', ip: '172.16.50.20', vlan: '50', fw: true, fwProduct: 'ufw', fwPolicy: 'Default deny' }, dmz);
   const mgmt = b.vlanZone(10);
   const bastion = b.add('bastion', 'bastion-01', { os: 'debian', osVersion: '13', ip: '10.10.10.10', vlan: '10' }, mgmt);
   b.link(inet, fw1).link(inet, fw2);
   b.link(fw1, core1, { connType: 'fiber' }).link(fw2, core2, { connType: 'fiber' });
   b.link(core1, core2, { connType: 'fiber', label: 'vPC peer-link', speed: '100 Gbps' });
-  b.link(core1, dist1).link(core2, dist2).link(core1, dist2).link(core2, dist1);
+  // Back-to-back vPC: four links between two switch pairs form one aggregate.
+  b.bond([b.linkId(core1, dist1), b.linkId(core2, dist2), b.linkId(core1, dist2), b.linkId(core2, dist1)], 'lacp', 'Po20', 'Po20');
   b.link(dist1, acc1).link(dist2, acc2).link(acc1, pc1).link(acc1, pc2).link(acc2, ap);
-  b.link(core1, esx1).link(core2, esx2).link(esx1, san, { connType: 'fiber' }).link(esx2, san, { connType: 'fiber' });
+  // Each ESXi host is bonded to both cores (MLAG / vPC): one aggregate, two different switches.
+  b.bond([b.linkId(esx1, core1), b.linkId(esx1, core2)], 'lacp', 'vmnic0+1', 'Po101');
+  b.bond([b.linkId(esx2, core1), b.linkId(esx2, core2)], 'lacp', 'vmnic0+1', 'Po102');
+  b.link(esx1, san, { connType: 'fiber' }).link(esx2, san, { connType: 'fiber' });
   b.link(fw1, rp, { vlan: '50', mode: 'access' }).link(rp, web, { connType: 'logical', label: 'HTTPS' });
   b.link(dist1, bastion);
   return b.build();
@@ -149,6 +155,16 @@ export function demoProject(): TemplateResult {
     vpnMode: 'Site-to-site + remote access',
     vpnEndpoint: 'vpn.acme.example',
     vpnNetwork: '10.99.0.0/24',
+    vpnIp: '10.99.0.1',
+    display: ['vpnIp', 'vpnEndpoint'],
+    services: ['nat', 'dhcp', 'ntp'],
+    fwRules: [
+      rule({ source: 'any', destination: '192.168.50.10', protocol: 'tcp', ports: '443', comment: 'Publish reverse proxy (NAT)' }),
+      rule({ source: 'any', destination: '203.0.113.10', protocol: 'udp', ports: '51820', comment: 'WireGuard' }),
+      rule({ direction: 'forward', source: '10.99.0.0/24', destination: '192.168.20.0/24', protocol: 'any', comment: 'Branch → servers' }),
+      rule({ direction: 'forward', source: '192.168.10.0/24', destination: 'any', protocol: 'any', comment: 'Admins' }),
+      rule({ action: 'deny', source: 'any', destination: 'any', protocol: 'any', comment: 'Default deny' }),
+    ],
   });
   const branch = b.add('router', 'branch-rtr-01', {
     ip: '10.20.0.1',
@@ -158,10 +174,22 @@ export function demoProject(): TemplateResult {
     vpnMode: 'Site-to-site',
     vpnEndpoint: '198.51.100.20',
     vpnNetwork: '10.99.0.0/24',
+    vpnIp: '10.99.0.2',
+    wifi: true,
+    ssid: 'Acme-Lyon',
+    band: 'Dual band',
+    wifiStandard: 'Wi-Fi 6 (ax)',
+    wifiSecurity: 'WPA3-Personal',
+    display: ['vpnIp', 'vpnProtocol', 'ssid'],
+    services: ['dhcp', 'dns', 'nat'],
     fw: true,
     fwProduct: 'Other',
     fwPolicy: 'Default deny',
-    description: 'Lyon branch office router with integrated VPN',
+    fwRules: [
+      rule({ source: 'any', destination: '198.51.100.20', protocol: 'udp', ports: '51820', comment: 'WireGuard from HQ' }),
+      rule({ action: 'deny', source: 'any', destination: 'any', protocol: 'any', comment: 'Default deny' }),
+    ],
+    description: 'Lyon branch office: router + Wi-Fi AP + DHCP/DNS + VPN',
   });
   const core = b.add('l3-switch', 'core-sw-01', {
     ip: '192.168.99.2',
@@ -182,7 +210,10 @@ export function demoProject(): TemplateResult {
     fw: true,
     fwProduct: 'nftables',
     fwPolicy: 'Default deny',
-    fwRules: 'allow tcp/22 from 192.168.10.0/24',
+    fwRules: [
+      rule({ source: '192.168.10.0/24', destination: '192.168.10.10', ports: '22', comment: 'SSH from admin VLAN' }),
+      rule({ source: '10.99.0.0/24', destination: '192.168.10.10', ports: '22', comment: 'SSH through VPN' }),
+    ],
   }, mgmt);
 
   const servers = b.vlanZone(20);
@@ -195,13 +226,13 @@ export function demoProject(): TemplateResult {
     ram: '256 GB',
     ips: [
       { address: '192.168.99.10', label: 'mgmt', vlan: '99' },
-      { address: '10.10.10.10', label: 'storage (NFS)' },
+      { address: '10.10.10.10', label: 'storage (NFS)', show: false },
     ],
   }, servers);
   b.add('vm', 'app-01', { os: 'debian', osVersion: '13', ip: '192.168.20.21', vlan: '20', vmid: '101', vcpu: '4', ram: '8 GB', role: 'Application server' }, pve);
-  b.add('vm', 'dc-01', { os: 'windows-server', osVersion: '2022', ip: '192.168.20.11', vlan: '20', vmid: '100', vcpu: '2', ram: '4 GB', description: 'Active Directory domain controller', fw: true, fwProduct: 'Windows Defender Firewall', fwPolicy: 'Default deny' }, pve);
-  b.add('lxc', 'dns-01', { os: 'debian', osVersion: '12', ip: '192.168.20.53', vlan: '20', ctid: '200', cores: '1', ram: '512 MB', description: 'Unbound resolver' }, pve);
-  b.add('lxc', 'monitor-01', { os: 'alpine', osVersion: '3.22', ip: '192.168.20.60', vlan: '20', ctid: '201', cores: '2', ram: '2 GB', description: 'Prometheus + Grafana' }, pve);
+  b.add('vm', 'dc-01', { os: 'windows-server', osVersion: '2022', ip: '192.168.20.11', vlan: '20', vmid: '100', vcpu: '2', ram: '4 GB', description: 'Active Directory domain controller', services: ['ldap', 'dns'], fwRules: [rule({ source: '192.168.0.0/16', destination: '192.168.20.11', protocol: 'tcp/udp', ports: '53,88,389,636', comment: 'AD / DNS' })], fw: true, fwProduct: 'Windows Defender Firewall', fwPolicy: 'Default deny' }, pve);
+  b.add('lxc', 'dns-01', { os: 'debian', osVersion: '12', ip: '192.168.20.53', vlan: '20', ctid: '200', cores: '1', ram: '512 MB', description: 'Unbound resolver', services: ['dns'] }, pve);
+  b.add('lxc', 'monitor-01', { os: 'alpine', osVersion: '3.22', ip: '192.168.20.60', vlan: '20', ctid: '201', cores: '2', ram: '2 GB', description: 'Prometheus + Grafana', services: ['monitoring', 'syslog'] }, pve);
   const docker = b.add('docker-host', 'docker-01', { os: 'ubuntu', osVersion: '24.04', ip: '192.168.20.30', vlan: '20', runsOn: 'vm' }, pve);
   const nginx = b.add('docker-container', 'nginx', { image: 'nginx', tag: '1.27', ip: '172.20.0.10', ports: '80:80, 443:443', dockerNetwork: 'frontend' }, docker);
   const front = b.add('docker-container', 'frontend', { image: 'acme/frontend', tag: '3.1.0', ip: '172.20.0.11', dockerNetwork: 'frontend' }, docker);
@@ -209,7 +240,7 @@ export function demoProject(): TemplateResult {
   const pg = b.add('docker-container', 'postgres', { image: 'postgres', tag: '17', ip: '172.20.0.20', dockerNetwork: 'backend' }, docker);
   const redis = b.add('docker-container', 'redis', { image: 'redis', tag: '7.4', ip: '172.20.0.21', dockerNetwork: 'backend' }, docker);
   const db = b.add('database-server', 'db-01', { os: 'rocky', osVersion: '9', ip: '192.168.20.40', vlan: '20', role: 'MariaDB (ERP)', gateway: '192.168.20.1', fw: true, fwProduct: 'firewalld', fwPolicy: 'Default deny' }, servers);
-  const nas = b.add('nas', 'nas-01', { ip: '192.168.20.50', vlan: '20', capacity: '48 TB', protocols: 'NFS, SMB', ips: [{ address: '10.10.10.50', label: 'storage (NFS)' }] }, servers);
+  const nas = b.add('nas', 'nas-01', { ip: '192.168.20.50', vlan: '20', capacity: '48 TB', protocols: 'NFS, SMB', services: ['files', 'backup'], ips: [{ address: '10.10.10.50', label: 'storage (NFS)' }] }, servers);
 
   const users = b.vlanZone(30);
   const ap = b.add('access-point', 'ap-01', { ip: '192.168.99.20', vlan: '99', ssid: 'Acme, Acme-Guest', band: 'Dual band' }, users);
@@ -217,17 +248,19 @@ export function demoProject(): TemplateResult {
   const prn = b.add('printer', 'prn-01', { ip: '192.168.30.20', vlan: '30' }, users);
 
   const dmz = b.vlanZone(50);
-  const rproxy = b.add('reverse-proxy', 'rproxy-01', { os: 'debian', osVersion: '13', ip: '192.168.50.10', vlan: '50', gateway: '192.168.50.1', fw: true, fwProduct: 'nftables', fwPolicy: 'Default deny', fwRules: 'allow tcp/80,443 from any' }, dmz);
-  const web = b.add('web-server', 'web-01', { os: 'ubuntu', osVersion: '24.04', ip: '192.168.50.20', vlan: '50', gateway: '192.168.50.1', fw: true, fwProduct: 'ufw', fwPolicy: 'Default deny', fwRules: 'allow tcp/8080 from 192.168.50.10' }, dmz);
+  const rproxy = b.add('reverse-proxy', 'rproxy-01', { os: 'debian', osVersion: '13', ip: '192.168.50.10', vlan: '50', gateway: '192.168.50.1', fw: true, fwProduct: 'nftables', fwPolicy: 'Default deny', fwRules: [rule({ destination: '192.168.50.10', ports: '80,443', comment: 'Public web' }), rule({ direction: 'out', source: '192.168.50.10', destination: '192.168.50.20', ports: '8080', comment: 'To web-01' })] }, dmz);
+  const web = b.add('web-server', 'web-01', { os: 'ubuntu', osVersion: '24.04', ip: '192.168.50.20', vlan: '50', gateway: '192.168.50.1', fw: true, fwProduct: 'ufw', fwPolicy: 'Default deny', fwRules: [rule({ source: '192.168.50.10', destination: '192.168.50.20', ports: '8080', comment: 'From reverse proxy only' })] }, dmz);
 
   b.link(inet, fw, { targetPort: 'port1 (WAN)' });
   b.link(fw, branch, { description: 'Site-to-site tunnel to the Lyon branch' });
   b.link(fw, core, { connType: 'fiber', sourcePort: 'port2', mode: 'trunk', vlan: '10,20,30,99' });
   b.link(fw, rproxy, { sourcePort: 'port3', mode: 'access', vlan: '50' });
   b.link(rproxy, web, { connType: 'logical', label: 'HTTPS' });
-  b.link(core, pve, { mode: 'trunk', vlan: '20' });
+  // Redundant uplinks: LACP bond to the hypervisor, active-backup to the NAS.
+  const trunk20 = { mode: 'trunk' as const, vlan: '20' };
+  b.bond([b.linkId(pve, core, trunk20), b.linkId(pve, core, trunk20)], 'lacp', 'bond0', 'Po1');
   b.link(core, db);
-  b.link(core, nas);
+  b.bond([b.linkId(nas, core), b.linkId(nas, core)], 'active-backup', 'bond0');
   b.link(core, admin);
   b.link(core, bastion);
   b.link(core, ap);
@@ -239,6 +272,7 @@ export function demoProject(): TemplateResult {
   b.link(back, pg, { connType: 'logical' });
   b.link(back, redis, { connType: 'logical' });
   b.add('legend', 'Legend', { text: 'Legend', showVlans: true, showLinks: true });
+  b.add('fw-table', 'Firewall rules', { text: 'Firewall rules', scope: 'all', showDisabled: false });
   return b.build();
 }
 

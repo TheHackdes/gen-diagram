@@ -13,7 +13,7 @@ export function container(def: Omit<ComponentDefinition, 'kind' | 'renderer'>): 
   return { kind: 'container', renderer: 'container', ...def };
 }
 
-export function zone(def: Omit<ComponentDefinition, 'kind' | 'renderer' | 'accepts' | 'role'> & {
+export function zone(def: Omit<ComponentDefinition, 'kind' | 'renderer' | 'role'> & {
   role?: ComponentDefinition['role'];
 }): ComponentDefinition {
   return { kind: 'zone', renderer: 'zone', accepts: '*', role: 'zone', ...def };

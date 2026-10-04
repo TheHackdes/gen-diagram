@@ -55,8 +55,8 @@ export function defaultNameFor(type: string): string {
   return NAME_PREFIX[type] ?? type;
 }
 
-const AUTO_HEIGHT = new Set(['title', 'text', 'legend']);
-const AUTO_WIDTH = new Set(['title']);
+const AUTO_HEIGHT = new Set(['title', 'text', 'legend', 'rulesTable']);
+const AUTO_WIDTH = new Set(['title', 'rulesTable', 'legend']);
 
 export interface CreateNodeOptions {
   position: XYPosition;

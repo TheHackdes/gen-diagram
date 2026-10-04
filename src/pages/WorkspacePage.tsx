@@ -12,6 +12,7 @@ import { StatusBar } from '../components/toolbar/StatusBar';
 import { TopBar } from '../components/toolbar/TopBar';
 import { cn } from '../components/ui/cn';
 import { useAutosave } from '../hooks/useAutosave';
+import { useDockedTables } from '../hooks/useDockedTables';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePresentation } from '../hooks/usePresentation';
 import { useDiagram } from '../store/diagramStore';
@@ -40,6 +41,7 @@ export function WorkspacePage() {
   useKeyboardShortcuts();
   useAutosave();
   usePresentation();
+  useDockedTables();
 
   const closeOverlays = () => {
     if (window.innerWidth < 1024) {

@@ -108,7 +108,7 @@ export function CustomOsDialog() {
         </div>
         {customOs.length > 0 && (
           <div className="border-t border-line pt-3">
-            <h4 className="mb-2 text-[11px] font-semibold tracking-wider text-subtle uppercase">In this project</h4>
+            <h4 className="mb-2 text-[13px] font-semibold text-fg">In this project</h4>
             <ul className="space-y-1">
               {customOs.map((o) => (
                 <li key={o.id} className="flex items-center gap-2 text-[13px]">

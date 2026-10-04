@@ -25,6 +25,7 @@ import { NetworkEdge } from './edges/NetworkEdge';
 import { ArrowNode, LegendNode, NoteNode, SeparatorNode, TextNode, TitleNode } from './nodes/AnnotationNodes';
 import { ContainerNode } from './nodes/ContainerNode';
 import { DeviceNode } from './nodes/DeviceNode';
+import { RulesTableNode } from './nodes/RulesTableNode';
 import { ZoneNode } from './nodes/ZoneNode';
 
 export const LIBRARY_MIME = 'application/x-infracanvas-preset';
@@ -39,6 +40,7 @@ const nodeTypes: NodeTypes = {
   legend: LegendNode,
   separator: SeparatorNode,
   arrow: ArrowNode,
+  rulesTable: RulesTableNode,
 };
 
 const edgeTypes: EdgeTypes = { network: NetworkEdge };

@@ -15,7 +15,7 @@ export function DiagramProperties() {
   return (
     <div>
       <div className="border-b border-line px-4 py-4">
-        <div className="text-[11px] font-semibold tracking-wider text-primary uppercase">Diagram</div>
+        <div className="text-[12px] font-medium text-muted">Diagram</div>
         <div className="truncate text-[15px] font-semibold text-fg">{metadata.name}</div>
         <div className="mt-2 grid grid-cols-3 gap-2 text-center">
           {[

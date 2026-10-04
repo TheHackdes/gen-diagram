@@ -98,7 +98,7 @@ export function HomePage() {
                 <div key={p.id} className="group relative overflow-hidden rounded-xl border border-line bg-surface transition-all hover:-translate-y-0.5 hover:border-primary hover:shadow-lg hover:shadow-primary/5">
                   <button type="button" onClick={() => openProject(p.id)} className="block w-full text-left">
                     <div className="h-32 border-b border-line bg-canvas p-3">
-                      {p.preview.length ? <ProjectThumbnail preview={p.preview} /> : <div className="flex h-full items-center justify-center text-[12px] text-subtle">Empty</div>}
+                      {p.preview.length ? <ProjectThumbnail preview={p.preview} links={p.previewLinks} /> : <div className="flex h-full items-center justify-center text-[12px] text-subtle">Empty</div>}
                     </div>
                     <div className="p-3">
                       <div className="truncate text-[13.5px] font-semibold text-fg group-hover:text-primary">{p.name}</div>

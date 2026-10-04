@@ -16,8 +16,10 @@ export interface ProjectSummary {
   createdAt: string;
   nodeCount: number;
   edgeCount: number;
-  /** Rough preview: top-level rectangles normalized to 0..1. */
+  /** Rough preview: rectangles normalized to 0..1. */
   preview: { x: number; y: number; w: number; h: number; c?: string }[];
+  /** Links between box centres [x1, y1, x2, y2] (absent in older summaries). */
+  previewLinks?: number[][];
 }
 
 function readJson<T>(key: string): T | null {
@@ -38,35 +40,42 @@ export function loadProjectFile(id: string): ProjectFile | null {
   return readJson<ProjectFile>(PROJECT_KEY(id));
 }
 
-function buildPreview(file: ProjectFile): ProjectSummary['preview'] {
+function buildPreview(file: ProjectFile): { boxes: ProjectSummary['preview']; links: number[][] } {
   const all = [...file.nodes, ...file.networks, ...file.groups];
-  const top = all.filter((n) => !n.parentId);
-  if (!top.length) return [];
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const n of top) {
-    const w = n.width ?? 200;
-    const h = n.height ?? 64;
-    minX = Math.min(minX, n.position.x);
-    minY = Math.min(minY, n.position.y);
-    maxX = Math.max(maxX, n.position.x + w);
-    maxY = Math.max(maxY, n.position.y + h);
-  }
+  if (!all.length) return { boxes: [], links: [] };
+  const byId = new Map(all.map((n) => [n.id, n]));
+  // Absolute positions: children are stored relative to their parent.
+  const abs = (id: string): { x: number; y: number } => {
+    const n = byId.get(id)!;
+    const p = n.parentId && byId.has(n.parentId) ? abs(n.parentId) : { x: 0, y: 0 };
+    return { x: p.x + n.position.x, y: p.y + n.position.y };
+  };
+  const depth = (id: string): number => {
+    const n = byId.get(id)!;
+    return n.parentId && byId.has(n.parentId) ? 1 + depth(n.parentId) : 0;
+  };
+  // Containers first so that their contents are drawn on top.
+  const boxes = all
+    .map((n) => ({ n, p: abs(n.id), w: n.width ?? 200, h: n.height ?? 64, d: depth(n.id) }))
+    .sort((a, b) => a.d - b.d);
+  const minX = Math.min(...boxes.map((b) => b.p.x));
+  const minY = Math.min(...boxes.map((b) => b.p.y));
+  const maxX = Math.max(...boxes.map((b) => b.p.x + b.w));
+  const maxY = Math.max(...boxes.map((b) => b.p.y + b.h));
   const span = Math.max(maxX - minX, maxY - minY, 1);
-  return top.slice(0, 80).map((n) => ({
-    x: (n.position.x - minX) / span,
-    y: (n.position.y - minY) / span,
-    w: (n.width ?? 200) / span,
-    h: (n.height ?? 64) / span,
-    c: n.data.type,
-  }));
+  const centre = new Map(boxes.map((b) => [b.n.id, [(b.p.x + b.w / 2 - minX) / span, (b.p.y + b.h / 2 - minY) / span]]));
+  return {
+    boxes: boxes.slice(0, 160).map((b) => ({ x: (b.p.x - minX) / span, y: (b.p.y - minY) / span, w: b.w / span, h: b.h / span, c: b.n.data.type })),
+    links: file.connections
+      .slice(0, 160)
+      .flatMap((e) => (centre.has(e.source) && centre.has(e.target) ? [[...centre.get(e.source)!, ...centre.get(e.target)!].map((v) => +v.toFixed(4))] : [])),
+  };
 }
 
 export class StorageQuotaError extends Error {}
 
 export function saveProjectFile(file: ProjectFile): void {
+  const preview = buildPreview(file);
   const summary: ProjectSummary = {
     id: file.metadata.id,
     name: file.metadata.name,
@@ -75,7 +84,8 @@ export function saveProjectFile(file: ProjectFile): void {
     updatedAt: file.metadata.updatedAt,
     nodeCount: file.nodes.length + file.networks.length + file.groups.length + file.annotations.length,
     edgeCount: file.connections.length,
-    preview: buildPreview(file),
+    preview: preview.boxes,
+    previewLinks: preview.links,
   };
   try {
     localStorage.setItem(PROJECT_KEY(file.metadata.id), JSON.stringify(file));

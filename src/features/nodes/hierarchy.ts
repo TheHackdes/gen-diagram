@@ -1,6 +1,7 @@
 import type { XYPosition } from '@xyflow/react';
 import { canContain, getDefinition } from '../../data/catalog';
 import type { InfraNode } from '../../types';
+import { inCompactHost, isCompactHost } from './ips';
 
 export function nodeSize(n: InfraNode): { width: number; height: number } {
   const def = getDefinition(n.data.type);
@@ -116,6 +117,8 @@ export function fitContainersToChildren(nodes: InfraNode[], padding = 20): Infra
     .filter((n) => result.some((c) => c.parentId === n.id))
     .sort((a, b) => depthOf(b, byId) - depthOf(a, byId));
   for (const parent of order) {
+    // Compact hosts size themselves (see relayoutContainer).
+    if (isCompactHost(parent) || inCompactHost(parent, byId)) continue;
     const idx = byIdx.get(parent.id)!;
     const current = result[idx];
     const kids = result.filter((c) => c.parentId === parent.id);
@@ -132,6 +135,40 @@ export function fitContainersToChildren(nodes: InfraNode[], padding = 20): Infra
     if (width !== size.width || height !== size.height) {
       result[idx] = { ...current, width, height, measured: undefined };
     }
+  }
+  return result;
+}
+
+/**
+ * Shrink the containers around `id` (zones, hosts) to their content without
+ * moving anything — used when a host gets smaller, e.g. in compact view.
+ */
+export function shrinkAncestors(nodes: InfraNode[], id: string, padding = 24): InfraNode[] {
+  let result = nodes;
+  let byId = indexById(result);
+  let parentId = byId.get(id)?.parentId;
+  let guard = 0;
+  while (parentId && guard++ < 50) {
+    const parent = byId.get(parentId);
+    if (!parent || isCompactHost(parent) || inCompactHost(parent, byId)) break;
+    const kids = result.filter((n) => n.parentId === parentId);
+    if (!kids.length) break;
+    let maxX = 0;
+    let maxY = 0;
+    for (const k of kids) {
+      const s = nodeSize(k);
+      maxX = Math.max(maxX, k.position.x + s.width);
+      maxY = Math.max(maxY, k.position.y + s.height);
+    }
+    const width = Math.max(200, maxX + padding);
+    const height = Math.max(120, maxY + padding);
+    const size = nodeSize(parent);
+    if (width < size.width || height < size.height) {
+      const updated = { ...parent, width: Math.min(size.width, width), height: Math.min(size.height, height), measured: undefined };
+      result = result.map((n) => (n.id === parentId ? updated : n));
+      byId = indexById(result);
+    }
+    parentId = parent.parentId;
   }
   return result;
 }
