@@ -45,6 +45,12 @@ interface UiState {
   leftTab: LeftTab;
   rightTab: RightTab;
   presentation: boolean;
+  /** Traffic animations in presentation mode. */
+  presentationAnim: boolean;
+  /** Device under the pointer in presentation mode (its links are highlighted). */
+  focusNode: string | null;
+  setPresentationAnim: (on: boolean) => void;
+  setFocusNode: (id: string | null) => void;
   dialog: DialogId;
   confirm: ConfirmRequest | null;
   prompt: PromptRequest | null;
@@ -86,6 +92,10 @@ export const useUi = create<UiState>((set, get) => ({
   leftTab: 'library',
   rightTab: 'properties',
   presentation: false,
+  presentationAnim: true,
+  focusNode: null,
+  setPresentationAnim: (presentationAnim) => set({ presentationAnim }),
+  setFocusNode: (focusNode) => set({ focusNode }),
   dialog: null,
   confirm: null,
   prompt: null,
@@ -109,7 +119,7 @@ export const useUi = create<UiState>((set, get) => ({
   setRightOpen: (rightOpen) => set({ rightOpen }),
   setLeftTab: (leftTab) => set({ leftTab, leftOpen: true }),
   setRightTab: (rightTab) => set({ rightTab, rightOpen: true }),
-  setPresentation: (presentation) => set({ presentation, contextMenu: null }),
+  setPresentation: (presentation) => set({ presentation, contextMenu: null, focusNode: null }),
   openDialog: (dialog) => set({ dialog }),
   askConfirm: (confirm) => set({ confirm }),
   askPrompt: (prompt) => set({ prompt }),

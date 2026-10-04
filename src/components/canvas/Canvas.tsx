@@ -12,11 +12,13 @@ import {
   type NodeTypes,
 } from '@xyflow/react';
 import { MousePointerClick } from 'lucide-react';
-import { useCallback, useEffect, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
 import { colorOf, getDefinition, getPreset } from '../../data/catalog';
 import { fitDiagram, flowApi } from '../../features/canvas/flowApi';
 import { computeGuides, type GuideLine } from '../../features/canvas/helperLines';
-import { absolutePosition, indexById } from '../../features/nodes/hierarchy';
+import { absolutePosition, descendantIds, indexById } from '../../features/nodes/hierarchy';
+import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { cn } from '../ui/cn';
 import { useDiagram } from '../../store/diagramStore';
 import { useUi } from '../../store/uiStore';
 import type { InfraEdge, InfraNode } from '../../types';
@@ -90,6 +92,65 @@ export function Canvas() {
   const onConnect = useDiagram((s) => s.onConnect);
   const presentation = useUi((s) => s.presentation);
   const theme = useUi((s) => s.theme);
+  const focusNode = useUi((s) => s.focusNode);
+  const presentationAnim = useUi((s) => s.presentationAnim);
+  const reducedMotion = useReducedMotion();
+  // Entrance animation when the presentation starts.
+  const [entering, setEntering] = useState(false);
+  useEffect(() => {
+    if (!presentation || reducedMotion) return;
+    setEntering(true);
+    const t = setTimeout(() => setEntering(false), 1900);
+    return () => clearTimeout(t);
+  }, [presentation, reducedMotion]);
+
+  // Display copies for the presentation (entrance order, focus dimming). The project is never modified.
+  const view = useMemo(() => {
+    if (!presentation) return { nodes, edges };
+    const byId = indexById(nodes);
+    let lit: Set<string> | null = null;
+    let litEdges: Set<string> | null = null;
+    if (focusNode && byId.has(focusNode)) {
+      const core = new Set([focusNode, ...descendantIds(focusNode, nodes)]);
+      litEdges = new Set(edges.filter((e) => core.has(e.source) || core.has(e.target)).map((e) => e.id));
+      lit = new Set(core);
+      for (const e of edges) if (litEdges.has(e.id)) [e.source, e.target].forEach((id) => lit!.add(id));
+      // Keep the containers of highlighted devices visible.
+      for (const id of [...lit]) {
+        let p = byId.get(id)?.parentId;
+        while (p) {
+          lit.add(p);
+          p = byId.get(p)?.parentId;
+        }
+      }
+    }
+    let minY = Infinity;
+    let maxY = -Infinity;
+    const absY = new Map<string, number>();
+    if (entering) {
+      for (const n of nodes) {
+        const y = absolutePosition(n, byId).y;
+        absY.set(n.id, y);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+    }
+    const span = Math.max(1, maxY - minY);
+    return {
+      nodes: nodes.map((n) => {
+        const dim = lit && !lit.has(n.id);
+        if (!dim && !entering) return n;
+        return {
+          ...n,
+          className: cn(n.className, dim && 'is-dimmed', entering && 'presentation-enter'),
+          // Top to bottom: traffic flows down from the Internet edge to the hosts.
+          style: entering ? { ...n.style, ['--enter-delay' as string]: `${Math.round(((absY.get(n.id)! - minY) / span) * 900)}ms` } : n.style,
+        };
+      }),
+      edges: litEdges ? edges.map((e) => ({ ...e, data: { ...e.data!, _focus: litEdges!.has(e.id) ? 'on' : 'off' } })) : edges,
+    };
+  }, [presentation, nodes, edges, focusNode, entering]);
+
   const [guides, setGuides] = useState<{ lines: GuideLine[]; offset: { x: number; y: number } }>({ lines: [], offset: { x: 0, y: 0 } });
 
   useEffect(() => {
@@ -136,10 +197,10 @@ export function Canvas() {
   const empty = nodes.length === 0;
 
   return (
-    <div className={presentation ? 'presentation relative h-full w-full' : 'relative h-full w-full'}>
+    <div className={cn('relative h-full w-full', presentation && 'presentation', entering && 'presentation-entering', presentation && presentationAnim && !reducedMotion && 'presentation-animated')}>
       <ReactFlow<InfraNode, InfraEdge>
-        nodes={nodes}
-        edges={edges}
+        nodes={view.nodes}
+        edges={view.edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
@@ -178,6 +239,8 @@ export function Canvas() {
           useUi.getState().setContextMenu({ x: e.clientX, y: e.clientY, flow: inst?.screenToFlowPosition({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 } });
         }}
         onPaneClick={() => useUi.getState().setContextMenu(null)}
+        onNodeMouseEnter={(_, node) => presentation && useUi.getState().setFocusNode(node.id)}
+        onNodeMouseLeave={() => presentation && useUi.getState().setFocusNode(null)}
         onMove={(_, vp) => useUi.getState().setZoom(vp.zoom)}
         connectionMode={ConnectionMode.Loose}
         connectionLineType={ConnectionLineType.SmoothStep}

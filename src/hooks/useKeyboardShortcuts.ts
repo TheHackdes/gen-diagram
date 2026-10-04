@@ -54,6 +54,7 @@ export function useKeyboardShortcuts(): void {
 
       if (ui.presentation) {
         if (key === 'escape' || key === 'p') ui.setPresentation(false);
+        if (key === 'a') ui.setPresentationAnim(!ui.presentationAnim);
         return;
       }
 

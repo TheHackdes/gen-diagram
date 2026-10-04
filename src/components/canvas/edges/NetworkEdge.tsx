@@ -10,10 +10,13 @@ import { Lock } from 'lucide-react';
 import { memo } from 'react';
 import { linkLabel } from '../../../features/connections/labels';
 import { CONNECTION_STYLE } from '../../../features/connections/suggest';
+import { useReducedMotion } from '../../../hooks/useReducedMotion';
 import { useDiagram } from '../../../store/diagramStore';
+import { useUi } from '../../../store/uiStore';
 import type { InfraEdge } from '../../../types';
 import { cn } from '../../ui/cn';
 import { geometry, isVertical, labelPositions, type Side } from './geometry';
+import { TrafficFlow } from './TrafficFlow';
 
 function portLabelStyle(side: Side): React.CSSProperties {
   const t = {
@@ -51,6 +54,10 @@ function NetworkEdgeImpl({ id, source, target, data, selected }: EdgeProps<Infra
     return first?.id === id;
   });
   const vlanIds = (data?.vlan ?? '').split(/[\s,]+/).filter(Boolean);
+  const reducedMotion = useReducedMotion();
+  const animate = useUi((st) => st.presentation && st.presentationAnim) && !reducedMotion;
+  // Presentation focus (computed by the canvas): 'on' for links of the focused device, 'off' for the others.
+  const focus = (data as { _focus?: 'on' | 'off' } | undefined)?._focus;
   const firstVlan = useDiagram((st) => (vlanIds.length ? st.vlans.find((v) => String(v.id) === vlanIds[0]) : undefined));
   if (!geoJson) return null;
   const { a, b, shift, aSlots, bSlots, marks } = JSON.parse(geoJson) as NonNullable<ReturnType<typeof geometry>>;
@@ -73,6 +80,9 @@ function NetworkEdgeImpl({ id, source, target, data, selected }: EdgeProps<Infra
   const style = CONNECTION_STYLE[type];
   const color = type === 'vlan' && firstVlan ? firstVlan.color : style.color;
   const markerId = `arrow-${id}`;
+  const dim = focus === 'off';
+  const lit = focus === 'on';
+  const length = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
   const trunk = data?.mode === 'trunk';
   // A label on a very short link (stack / peer link) would cover the devices.
   const tooShort = Math.hypot(b.x - a.x, b.y - a.y) < 90;
@@ -89,7 +99,9 @@ function NetworkEdgeImpl({ id, source, target, data, selected }: EdgeProps<Infra
           </marker>
         </defs>
       )}
+      <g style={{ opacity: dim ? 0.12 : 1, transition: 'opacity 200ms ease' }}>
       {type === 'fiber' && <path d={path} fill="none" stroke={color} strokeOpacity={0.18} strokeWidth={7} strokeLinecap="round" />}
+      {lit && <path d={path} fill="none" stroke={color} strokeOpacity={0.22} strokeWidth={9} strokeLinecap="round" />}
       <BaseEdge
         id={id}
         path={path}
@@ -106,6 +118,8 @@ function NetworkEdgeImpl({ id, source, target, data, selected }: EdgeProps<Infra
       {marks.map((m, i) => (
         <ellipse key={i} cx={m.x} cy={m.y} rx={m.rx} ry={m.ry} fill="none" stroke={selected ? 'var(--primary)' : color} strokeWidth={1.6} />
       ))}
+      {animate && !dim && <TrafficFlow id={id} path={path} length={length} color={color} data={data} bonded={!!data?.bondId} />}
+      </g>
       <EdgeLabelRenderer>
         {hasLabel && (
           <div
@@ -114,7 +128,7 @@ function NetworkEdgeImpl({ id, source, target, data, selected }: EdgeProps<Infra
               selected ? 'border-primary' : 'border-line',
             )}
             data-edge-id={id}
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, pointerEvents: 'all' }}
+            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`, pointerEvents: 'all', opacity: dim ? 0.15 : 1, transition: 'opacity 200ms ease' }}
           >
             {type === 'vpn' && <Lock size={9} style={{ color }} />}
             {label}
@@ -132,12 +146,12 @@ function NetworkEdgeImpl({ id, source, target, data, selected }: EdgeProps<Infra
             )}
           </div>
         )}
-        {showPorts && data?.sourcePort && aSlots <= CROWDED && (
+        {showPorts && !dim && data?.sourcePort && aSlots <= CROWDED && (
           <div className="edge-label font-mono text-[9px] text-subtle" data-edge-id={id} style={portLabelStyle(a)}>
             {data.sourcePort}
           </div>
         )}
-        {showPorts && data?.targetPort && bSlots <= CROWDED && (
+        {showPorts && !dim && data?.targetPort && bSlots <= CROWDED && (
           <div className="edge-label font-mono text-[9px] text-subtle" data-edge-id={id} style={portLabelStyle(b)}>
             {data.targetPort}
           </div>

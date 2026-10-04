@@ -37,6 +37,7 @@ const GROUPS: { title: string; items: [string[], string][] }[] = [
       [['+', '/', '-'], 'Zoom in / out'],
       [['⇧', '1'], 'Fit to screen'],
       [['P'], 'Presentation mode'],
+      [['A'], 'Traffic animation (presentation)'],
     ],
   },
   {

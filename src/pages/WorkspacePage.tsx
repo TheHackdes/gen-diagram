@@ -1,5 +1,5 @@
 import { ReactFlowProvider } from '@xyflow/react';
-import { Minimize2 } from 'lucide-react';
+import { Minimize2, Pause, Play } from 'lucide-react';
 import { Canvas } from '../components/canvas/Canvas';
 import { CustomOsDialog } from '../components/dialogs/CustomOsDialog';
 import { ExportDialog } from '../components/dialogs/ExportDialog';
@@ -13,6 +13,7 @@ import { StatusBar } from '../components/toolbar/StatusBar';
 import { TopBar } from '../components/toolbar/TopBar';
 import { cn } from '../components/ui/cn';
 import { useAutosave } from '../hooks/useAutosave';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import { useDockedTables } from '../hooks/useDockedTables';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { usePresentation } from '../hooks/usePresentation';
@@ -21,16 +22,31 @@ import { useUi } from '../store/uiStore';
 
 function PresentationOverlay() {
   const name = useDiagram((s) => s.metadata.name);
+  const anim = useUi((s) => s.presentationAnim);
+  const reduced = useReducedMotion();
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between p-4">
       <div className="pointer-events-auto rounded-xl border border-line bg-surface/85 px-3 py-1.5 text-[13px] font-semibold text-fg shadow-sm backdrop-blur">{name}</div>
+      <div className="pointer-events-auto flex items-center gap-2">
+      {!reduced && (
+        <button
+          type="button"
+          aria-pressed={anim}
+          onClick={() => useUi.getState().setPresentationAnim(!anim)}
+          className="flex items-center gap-1.5 rounded-xl border border-line bg-surface/85 px-3 py-1.5 text-[12.5px] font-medium text-muted shadow-sm backdrop-blur hover:text-fg"
+          title="Show or pause the traffic animation (A)"
+        >
+          {anim ? <Pause size={14} /> : <Play size={14} />} {anim ? 'Pause traffic' : 'Show traffic'} <span className="text-subtle">A</span>
+        </button>
+      )}
       <button
         type="button"
         onClick={() => useUi.getState().setPresentation(false)}
-        className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-line bg-surface/85 px-3 py-1.5 text-[12.5px] font-medium text-muted shadow-sm backdrop-blur hover:text-fg"
+        className="flex items-center gap-1.5 rounded-xl border border-line bg-surface/85 px-3 py-1.5 text-[12.5px] font-medium text-muted shadow-sm backdrop-blur hover:text-fg"
       >
         <Minimize2 size={14} /> Exit <span className="text-subtle">Esc</span>
       </button>
+      </div>
     </div>
   );
 }
