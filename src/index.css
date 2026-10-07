@@ -252,6 +252,10 @@ body {
 .presentation .react-flow__node {
   transition: opacity 220ms ease;
 }
+/* Security view: what does not filter traffic steps back. */
+.react-flow__node.view-dim {
+  opacity: 0.32;
+}
 /* Focus on a device: the rest of the diagram steps back. */
 .presentation .react-flow__node.is-dimmed {
   opacity: 0.18;

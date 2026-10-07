@@ -23,6 +23,19 @@ export const F = {
   disk: { key: 'disk', label: 'Storage', type: 'text', placeholder: '2× 960 GB NVMe', advanced: true },
   dns: { key: 'dns', label: 'DNS servers', type: 'text', placeholder: '192.168.10.53', advanced: true, mono: true },
   portCount: { key: 'portCount', label: 'Port count', type: 'number', placeholder: '48', advanced: true },
+  stp: {
+    key: 'stp',
+    label: 'Spanning tree',
+    type: 'select',
+    options: [
+      { value: 'rstp', label: 'RSTP (802.1w)' },
+      { value: 'mstp', label: 'MSTP (802.1s)' },
+      { value: 'pvst', label: 'Rapid PVST+' },
+      { value: 'stp', label: 'STP (802.1D)' },
+      { value: 'off', label: 'Disabled' },
+    ],
+    help: 'Used to check redundant links between switches (loops).',
+  },
 } satisfies Record<string, FieldDef>;
 
 export const DESCRIPTION_ONLY: FieldDef[] = [F.description];
@@ -39,6 +52,9 @@ export const NETWORK_DEVICE_FIELDS: FieldDef[] = [
   F.location,
   F.description,
 ];
+
+/** Switches: network device fields and spanning tree. */
+export const SWITCH_FIELDS: FieldDef[] = [...NETWORK_DEVICE_FIELDS.slice(0, 2), F.stp, ...NETWORK_DEVICE_FIELDS.slice(2)];
 
 export const SERVER_FIELDS: FieldDef[] = [
   F.hostname,

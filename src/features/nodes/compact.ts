@@ -1,4 +1,5 @@
 import type { InfraNode } from '../../types';
+import { nodeIndex } from './hierarchy';
 
 /** Information that can be shown on each line of a compact host. */
 export const COMPACT_FIELDS = [
@@ -27,11 +28,12 @@ export function compactFieldsOf(host: InfraNode | undefined): CompactField[] {
 
 /** The outermost compact host above a node decides what its lines show. */
 export function compactHostAbove(parentId: string | undefined, nodes: InfraNode[]): InfraNode | undefined {
+  const { byId } = nodeIndex(nodes);
   let pid = parentId;
   let found: InfraNode | undefined;
   let guard = 0;
   while (pid && guard++ < 20) {
-    const p = nodes.find((n) => n.id === pid);
+    const p = byId.get(pid);
     if (!p) break;
     if (p.data.props.compact === true) found = p;
     pid = p.parentId;

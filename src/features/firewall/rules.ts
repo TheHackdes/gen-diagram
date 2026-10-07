@@ -92,6 +92,8 @@ export function isValidPorts(ports: string): boolean {
 export function addressProblem(value: string): string | null {
   const v = value.trim();
   if (!v) return 'Required';
+  // References to VLANs / devices are checked against the diagram (validation).
+  if (v.startsWith('vlan:') || v.startsWith('node:')) return null;
   if (/^[\d.]+(\/\d+)?$/.test(v) && !isValidIPv4(v) && !isValidCidr(v)) return 'Invalid IP / CIDR';
   return null;
 }
@@ -123,12 +125,12 @@ export const COMMON_PORTS: { value: string; label: string }[] = [
 const DIRECTION_LABEL: Record<string, string> = { in: 'In', out: 'Out', forward: 'Fwd' };
 
 /** One-line reading of a rule: "Allow TCP 443 · any → 10.0.0.5". */
-export function describeRule(r: FirewallRule): { head: string; flow: string } {
+export function describeRule(r: FirewallRule, name: (value: string) => string = (v) => v): { head: string; flow: string } {
   const proto = r.protocol === 'any' ? 'any protocol' : r.protocol.toUpperCase();
   const ports = r.protocol === 'icmp' || r.protocol === 'any' ? '' : ` ${r.ports.trim() || 'all ports'}`;
   return {
     head: `${r.action === 'allow' ? 'Allow' : 'Deny'} ${proto}${ports}`,
-    flow: `${DIRECTION_LABEL[r.direction]} · ${r.source || '?'} → ${r.destination || '?'}`,
+    flow: `${DIRECTION_LABEL[r.direction]} · ${name(r.source) || '?'} → ${name(r.destination) || '?'}`,
   };
 }
 

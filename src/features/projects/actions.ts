@@ -1,14 +1,14 @@
 import { useDiagram } from '../../store/diagramStore';
 import { useUi } from '../../store/uiStore';
 import { downloadBlob, slugify } from '../../utils/misc';
-import { ProjectFormatError } from './serialization';
-import { StorageQuotaError } from './storage';
+import { fromProjectFile, ProjectFormatError } from './serialization';
+import { addVersion, loadVersion, StorageQuotaError, type VersionSummary } from './storage';
 
 /** User-facing project commands shared by the toolbar, menus and shortcuts. */
 export const projectActions = {
   save() {
     try {
-      useDiagram.getState().save();
+      useDiagram.getState().save('manual');
       useUi.getState().toast('Project saved', 'success');
     } catch (e) {
       useUi.getState().toast(e instanceof StorageQuotaError ? 'Browser storage is full — export to JSON instead.' : 'Could not save the project', 'error');
@@ -54,6 +54,18 @@ export const projectActions = {
       }
     };
     input.click();
+  },
+  /** Go back to a saved version; the current state is kept as a version first. */
+  async restoreVersion(v: VersionSummary) {
+    const file = await loadVersion(v.id);
+    if (!file) return useUi.getState().toast('This version could not be read', 'error');
+    const st = useDiagram.getState();
+    await addVersion(st.exportFile(), 'restore', `Before restoring ${new Date(v.savedAt).toLocaleString()}`);
+    const content = fromProjectFile(file);
+    content.metadata = { ...content.metadata, id: st.metadata.id, createdAt: st.metadata.createdAt };
+    st.loadContent(content);
+    useDiagram.getState().save('none');
+    useUi.getState().toast(`Restored the version of ${new Date(v.savedAt).toLocaleString()}`, 'success');
   },
   /** Run `fn` after confirming if there are unsaved changes. */
   guardUnsaved(fn: () => void) {

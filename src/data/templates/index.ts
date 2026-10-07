@@ -257,8 +257,8 @@ export function demoProject(): TemplateResult {
   b.link(fw, rproxy, { sourcePort: 'port3', mode: 'access', vlan: '50' });
   b.link(rproxy, web, { connType: 'logical', label: 'HTTPS' });
   // Redundant uplinks: LACP bond to the hypervisor, active-backup to the NAS.
-  const trunk20 = { mode: 'trunk' as const, vlan: '20' };
-  b.bond([b.linkId(pve, core, trunk20), b.linkId(pve, core, trunk20)], 'lacp', 'bond0', 'Po1');
+  const pveTrunk = { mode: 'trunk' as const, vlan: '20,99' };
+  b.bond([b.linkId(pve, core, pveTrunk), b.linkId(pve, core, pveTrunk)], 'lacp', 'bond0', 'Po1');
   b.link(core, db);
   b.bond([b.linkId(nas, core), b.linkId(nas, core)], 'active-backup', 'bond0');
   b.link(core, admin);

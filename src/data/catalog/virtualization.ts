@@ -217,6 +217,7 @@ export const VIRTUALIZATION: ComponentDefinition[] = [
     fields: [
       { key: 'ports', label: 'Bridge ports', type: 'text', placeholder: 'eno1', mono: true },
       { key: 'vlanAware', label: 'VLAN aware', type: 'boolean' },
+      { key: 'stp', label: 'Spanning tree', type: 'select', options: [{ value: 'stp', label: 'STP on' }, { value: 'off', label: 'Off' }] },
       F.ip,
       { key: 'vlans', label: 'Allowed VLANs', type: 'vlanList' },
       F.description,

@@ -6,12 +6,15 @@ import { getOperatingSystem } from '../../../data/operatingSystems';
 import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
 import { cn } from '../../ui/cn';
+import { useStore } from '@xyflow/react';
+import { lowDetailCards } from '../../../features/canvas/lod';
 import { CompactRow, useInCompactHost } from './CompactRow';
 import { hasBadges, hiddenAddressCount, requiredHeight, shownAddresses } from '../../../features/nodes/ips';
 import { AddressLines, CapabilityBadges, DetailLines, EditableName, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChips } from './shared';
 
 function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) {
   const compact = useInCompactHost(parentId);
+  const simple = useStore((s) => lowDetailCards(s.transform[2]));
   const def = getDefinition(data.type);
   const color = data.color ?? colorOf(def);
   const os = getOperatingSystem(data.props.os);
@@ -24,17 +27,33 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
 
   if (compact) return <CompactRow id={id} data={data} selected={selected} parentId={parentId} />;
 
+  // Level of detail (large diagrams, zoomed out): icon and name only.
+  if (simple) {
+    return (
+      <div
+        key="simple"
+        className={cn('selection-ring relative flex h-full w-full items-center gap-2 rounded-xl border bg-node px-2.5', selected ? 'border-primary ring-2 ring-primary/30' : 'border-node-line')}
+        style={{ borderLeftWidth: 3, borderLeftStyle: 'solid', borderLeftColor: color }}
+      >
+        <NodeHandles nodeId={id} />
+        <IconTile icon={def.icon} color={color} size={isDocker ? 28 : 36} />
+        <span className="min-w-0 truncate text-[15px] font-semibold text-fg">{data.name}</span>
+      </div>
+    );
+  }
+
   if (isDocker) {
     const image = str(data.props.image);
     const tag = str(data.props.tag);
     const ports = str(data.props.ports);
     return (
       <div
+        key="docker"
         className={cn(
           'selection-ring relative flex h-full w-full items-center gap-2 rounded-lg border bg-node px-2 transition-shadow',
           selected ? 'border-primary ring-2 ring-primary/30' : 'border-node-line',
         )}
-        style={{ boxShadow: 'var(--node-shadow)', borderLeft: `3px solid ${color}` }}
+        style={{ boxShadow: 'var(--node-shadow)', borderLeftWidth: 3, borderLeftStyle: 'solid', borderLeftColor: color }}
       >
         <Resizer id={id} selected={selected} minWidth={120} minHeight={40} locked={data.locked} />
         <NodeHandles nodeId={id} />
@@ -68,6 +87,7 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
 
   return (
     <div
+      key="full"
       className={cn(
         'selection-ring relative flex h-full w-full items-center gap-2.5 rounded-xl border bg-node px-2.5 transition-shadow',
         isLxc && 'border-dashed',

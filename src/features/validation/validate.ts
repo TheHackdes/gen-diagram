@@ -5,6 +5,8 @@ import { cidrEquals, cidrOverlaps, ipInCidr, isValidCidr, isValidIPv4, isValidMa
 import { str } from '../../utils/misc';
 import { addressEntries, allIps, hasHostFirewall, hasVpn, hasWifi } from '../nodes/ips';
 import { servicesOf } from '../../data/services';
+import { referenceProblem } from '../firewall/addresses';
+import { switchingLoops, vlanReachability } from './l2';
 import { addressProblem, hasRules, isValidPorts, rulesOf } from '../firewall/rules';
 
 /** Devices that forward Ethernet frames between their ports (can loop). */
@@ -244,6 +246,10 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
     );
   }
 
+  // --- Layer 2: switching loops, VLANs cut off from their gateway -------
+  for (const issue of switchingLoops(nodes, edges, bonds)) push(issue);
+  for (const issue of vlanReachability(nodes, edges, vlans)) push(issue);
+
   // --- Redundancy groups (stack / MLAG / HA) ----------------------------
   const groups = new Map<string, InfraNode[]>();
   for (const n of nodes) {
@@ -323,8 +329,8 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
     rulesOf(n.data.props).forEach((r, i) => {
       if (!r.enabled) return;
       const where = `${n.data.name} rule #${i + 1}`;
-      const src = addressProblem(r.source);
-      const dst = addressProblem(r.destination);
+      const src = addressProblem(r.source) ?? referenceProblem(r.source, nodes, vlans);
+      const dst = addressProblem(r.destination) ?? referenceProblem(r.destination, nodes, vlans);
       if (src) push({ severity: 'error', message: `${where}: source — ${src}`, nodeIds: [n.id] });
       if (dst) push({ severity: 'error', message: `${where}: destination — ${dst}`, nodeIds: [n.id] });
       if ((r.protocol === 'tcp' || r.protocol === 'udp' || r.protocol === 'tcp/udp') && !isValidPorts(r.ports))

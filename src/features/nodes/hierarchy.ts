@@ -172,3 +172,21 @@ export function shrinkAncestors(nodes: InfraNode[], id: string, padding = 24): I
   }
   return result;
 }
+
+interface NodeIndex {
+  byId: Map<string, InfraNode>;
+  childCount: Map<string, number>;
+}
+const nodeIndexCache = new WeakMap<InfraNode[], NodeIndex>();
+
+/** Lookups shared by all canvas components for one version of the node list. */
+export function nodeIndex(nodes: InfraNode[]): NodeIndex {
+  let idx = nodeIndexCache.get(nodes);
+  if (idx) return idx;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const childCount = new Map<string, number>();
+  for (const n of nodes) if (n.parentId) childCount.set(n.parentId, (childCount.get(n.parentId) ?? 0) + 1);
+  idx = { byId, childCount };
+  nodeIndexCache.set(nodes, idx);
+  return idx;
+}

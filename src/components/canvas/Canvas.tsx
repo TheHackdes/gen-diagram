@@ -8,15 +8,18 @@ import {
   SelectionMode,
   ViewportPortal,
   type EdgeTypes,
+  type ReactFlowInstance,
   type NodeChange,
   type NodeTypes,
 } from '@xyflow/react';
 import { MousePointerClick } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import { colorOf, getDefinition, getPreset } from '../../data/catalog';
 import { fitDiagram, flowApi } from '../../features/canvas/flowApi';
 import { computeGuides, type GuideLine } from '../../features/canvas/helperLines';
 import { absolutePosition, descendantIds, indexById } from '../../features/nodes/hierarchy';
+import { applyView, viewOf } from '../../features/canvas/views';
+import { LOD } from '../../features/canvas/lod';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { cn } from '../ui/cn';
 import { useDiagram } from '../../store/diagramStore';
@@ -82,6 +85,55 @@ function EmptyState() {
   );
 }
 
+/*
+ * Handlers and options passed to React Flow are module-level constants: React
+ * Flow forwards them to every node and link, and a new function identity on
+ * each render would re-render all of them on every frame of a drag.
+ */
+const CONNECTION_LINE_STYLE = { stroke: 'var(--primary)', strokeWidth: 2, strokeDasharray: '6 4' };
+const SNAP_GRID: [number, number] = [8, 8];
+const PAN_BUTTONS = [1];
+const MULTI_SELECT_KEYS = ['Meta', 'Control', 'Shift'];
+const PRO_OPTIONS = { hideAttribution: true };
+const FIT_VIEW_OPTIONS = { padding: 0.12, maxZoom: 1.25 };
+
+const presenting = () => useUi.getState().presentation;
+const flowPoint = (e: { clientX: number; clientY: number }) => flowApi.instance?.screenToFlowPosition({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 };
+
+const onInit = (inst: ReactFlowInstance<InfraNode, InfraEdge>) => {
+  flowApi.instance = inst;
+  fitDiagram(0);
+};
+const onNodeDragStart = (_: unknown, node: InfraNode) => useDiagram.getState().checkpoint(`drag:${node.id}:${Date.now()}`);
+const onSelectionDragStart = () => useDiagram.getState().checkpoint();
+const onSelectionDragStop = (_: unknown, dragged: InfraNode[]) => useDiagram.getState().handleDragStop(dragged.map((n) => n.id));
+const onNodeContextMenu = (e: ReactMouseEvent, node: InfraNode) => {
+  e.preventDefault();
+  if (presenting()) return;
+  if (!node.selected) useDiagram.getState().select([node.id]);
+  useUi.getState().setContextMenu({ x: e.clientX, y: e.clientY, nodeId: node.id, flow: flowPoint(e) });
+};
+const onEdgeContextMenu = (e: ReactMouseEvent, edge: InfraEdge) => {
+  e.preventDefault();
+  if (presenting()) return;
+  useDiagram.getState().select([], [edge.id]);
+  useUi.getState().setContextMenu({ x: e.clientX, y: e.clientY, edgeId: edge.id, flow: { x: 0, y: 0 } });
+};
+const onPaneContextMenu = (e: ReactMouseEvent | MouseEvent) => {
+  e.preventDefault();
+  if (presenting()) return;
+  useUi.getState().setContextMenu({ x: e.clientX, y: e.clientY, flow: flowPoint(e) });
+};
+const onPaneClick = () => useUi.getState().setContextMenu(null);
+const onNodeMouseEnter = (_: unknown, node: InfraNode) => presenting() && useUi.getState().setFocusNode(node.id);
+const onNodeMouseLeave = () => presenting() && useUi.getState().setFocusNode(null);
+const onMove = (_: unknown, vp: { zoom: number }) => useUi.getState().setZoom(vp.zoom);
+const minimapColor = (n: InfraNode) => {
+  const def = getDefinition(n.data.type);
+  return def.kind === 'zone' ? 'transparent' : colorOf(def);
+};
+const minimapStroke = (n: InfraNode) => colorOf(getDefinition(n.data.type));
+
 export function Canvas() {
   const nodes = useDiagram((s) => s.nodes);
   const edges = useDiagram((s) => s.edges);
@@ -93,6 +145,8 @@ export function Canvas() {
   const presentation = useUi((s) => s.presentation);
   const theme = useUi((s) => s.theme);
   const focusNode = useUi((s) => s.focusNode);
+  const exporting = useUi((s) => s.exporting);
+  const large = nodes.length >= LOD.minNodes;
   const presentationAnim = useUi((s) => s.presentationAnim);
   const reducedMotion = useReducedMotion();
   // Entrance animation when the presentation starts.
@@ -104,9 +158,13 @@ export function Canvas() {
     return () => clearTimeout(t);
   }, [presentation, reducedMotion]);
 
+  // Current view (hidden layers, security dimming).
+  const layered = useMemo(() => applyView(nodes, edges, viewOf(settings)), [nodes, edges, settings]);
+
   // Display copies for the presentation (entrance order, focus dimming). The project is never modified.
   const view = useMemo(() => {
-    if (!presentation) return { nodes, edges };
+    const { nodes, edges } = layered;
+    if (!presentation) return layered;
     const byId = indexById(nodes);
     let lit: Set<string> | null = null;
     let litEdges: Set<string> | null = null;
@@ -149,7 +207,7 @@ export function Canvas() {
       }),
       edges: litEdges ? edges.map((e) => ({ ...e, data: { ...e.data!, _focus: litEdges!.has(e.id) ? 'on' : 'off' } })) : edges,
     };
-  }, [presentation, nodes, edges, focusNode, entering]);
+  }, [presentation, layered, focusNode, entering]);
 
   const [guides, setGuides] = useState<{ lines: GuideLine[]; offset: { x: number; y: number } }>({ lines: [], offset: { x: 0, y: 0 } });
 
@@ -176,6 +234,11 @@ export function Canvas() {
     },
     [onNodesChange, guides.lines.length],
   );
+
+  const onNodeDragStop = useCallback((_: unknown, __: unknown, dragged: InfraNode[]) => {
+    setGuides({ lines: [], offset: { x: 0, y: 0 } });
+    useDiagram.getState().handleDragStop(dragged.map((n) => n.id));
+  }, []);
 
   const onDragOver = useCallback((e: DragEvent) => {
     if (!e.dataTransfer.types.includes(LIBRARY_MIME)) return;
@@ -206,64 +269,44 @@ export function Canvas() {
         onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onInit={(inst) => {
-          flowApi.instance = inst;
-          fitDiagram(0);
-        }}
+        onInit={onInit}
         onDrop={onDrop}
         onDragOver={onDragOver}
-        onNodeDragStart={(_, node) => useDiagram.getState().checkpoint(`drag:${node.id}:${Date.now()}`)}
-        onNodeDragStop={(_, __, dragged) => {
-          setGuides({ lines: [], offset: { x: 0, y: 0 } });
-          useDiagram.getState().handleDragStop(dragged.map((n) => n.id));
-        }}
-        onSelectionDragStart={() => useDiagram.getState().checkpoint()}
-        onSelectionDragStop={(_, dragged) => useDiagram.getState().handleDragStop(dragged.map((n) => n.id))}
-        onNodeContextMenu={(e, node) => {
-          e.preventDefault();
-          if (presentation) return;
-          const inst = flowApi.instance;
-          if (!node.selected) useDiagram.getState().select([node.id]);
-          useUi.getState().setContextMenu({ x: e.clientX, y: e.clientY, nodeId: node.id, flow: inst?.screenToFlowPosition({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 } });
-        }}
-        onEdgeContextMenu={(e, edge) => {
-          e.preventDefault();
-          if (presentation) return;
-          useDiagram.getState().select([], [edge.id]);
-          useUi.getState().setContextMenu({ x: e.clientX, y: e.clientY, edgeId: edge.id, flow: { x: 0, y: 0 } });
-        }}
-        onPaneContextMenu={(e) => {
-          e.preventDefault();
-          if (presentation) return;
-          const inst = flowApi.instance;
-          useUi.getState().setContextMenu({ x: e.clientX, y: e.clientY, flow: inst?.screenToFlowPosition({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 } });
-        }}
-        onPaneClick={() => useUi.getState().setContextMenu(null)}
-        onNodeMouseEnter={(_, node) => presentation && useUi.getState().setFocusNode(node.id)}
-        onNodeMouseLeave={() => presentation && useUi.getState().setFocusNode(null)}
-        onMove={(_, vp) => useUi.getState().setZoom(vp.zoom)}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
+        onSelectionDragStart={onSelectionDragStart}
+        onSelectionDragStop={onSelectionDragStop}
+        onNodeContextMenu={onNodeContextMenu}
+        onEdgeContextMenu={onEdgeContextMenu}
+        onPaneContextMenu={onPaneContextMenu}
+        onPaneClick={onPaneClick}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
+        onMove={onMove}
         connectionMode={ConnectionMode.Loose}
         connectionLineType={ConnectionLineType.SmoothStep}
-        connectionLineStyle={{ stroke: 'var(--primary)', strokeWidth: 2, strokeDasharray: '6 4' }}
+        connectionLineStyle={CONNECTION_LINE_STYLE}
         connectionRadius={28}
         snapToGrid={settings.snapToGrid}
-        snapGrid={[8, 8]}
+        snapGrid={SNAP_GRID}
         selectionMode={SelectionMode.Partial}
         selectionOnDrag={!presentation}
-        panOnDrag={presentation ? true : [1]}
+        panOnDrag={presentation ? true : PAN_BUTTONS}
         panActivationKeyCode="Space"
-        multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
+        multiSelectionKeyCode={MULTI_SELECT_KEYS}
         deleteKeyCode={null}
         nodesDraggable={!presentation}
         nodesConnectable={!presentation}
         elementsSelectable={!presentation}
         elevateNodesOnSelect={false}
+        // Large diagrams: only what is on screen is in the DOM (an export renders everything).
+        onlyRenderVisibleElements={large && !exporting}
         minZoom={0.08}
         maxZoom={3}
         colorMode={theme}
-        proOptions={{ hideAttribution: true }}
+        proOptions={PRO_OPTIONS}
         fitView
-        fitViewOptions={{ padding: 0.12, maxZoom: 1.25 }}
+        fitViewOptions={FIT_VIEW_OPTIONS}
       >
         {settings.showGrid && !presentation && <Background variant={BackgroundVariant.Dots} gap={16} size={1.3} />}
         {settings.showMinimap && !presentation && (
@@ -271,11 +314,8 @@ export function Canvas() {
             pannable
             zoomable
             nodeStrokeWidth={2}
-            nodeColor={(n) => {
-              const def = getDefinition((n as InfraNode).data.type);
-              return def.kind === 'zone' ? 'transparent' : colorOf(def);
-            }}
-            nodeStrokeColor={(n) => colorOf(getDefinition((n as InfraNode).data.type))}
+            nodeColor={minimapColor}
+            nodeStrokeColor={minimapStroke}
             maskColor="rgb(100 116 139 / 0.12)"
           />
         )}

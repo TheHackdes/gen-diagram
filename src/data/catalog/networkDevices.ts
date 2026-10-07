@@ -1,5 +1,5 @@
 import type { ComponentDefinition } from '../../types';
-import { F, NETWORK_DEVICE_FIELDS } from './fields';
+import { F, NETWORK_DEVICE_FIELDS, SWITCH_FIELDS } from './fields';
 import { device, ethPorts } from './helpers';
 
 const SPEED_OPTIONS = ['10 Mbps', '100 Mbps', '1 Gbps', '10 Gbps', '25 Gbps', '100 Gbps'].map((v) => ({
@@ -27,7 +27,7 @@ export const NETWORK_DEVICES: ComponentDefinition[] = [
     icon: 'switch',
     description: 'Layer 2 access switch.',
     keywords: ['access', 'l2', 'ethernet'],
-    fields: NETWORK_DEVICE_FIELDS,
+    fields: SWITCH_FIELDS,
     portPattern: ethPorts('Gi1/0/', 1),
     defaults: { portCount: '48' },
   }),
@@ -39,7 +39,7 @@ export const NETWORK_DEVICES: ComponentDefinition[] = [
     icon: 'l3-switch',
     description: 'Core / distribution switch with routing (SVIs).',
     keywords: ['core', 'distribution', 'l3', 'multilayer'],
-    fields: NETWORK_DEVICE_FIELDS,
+    fields: SWITCH_FIELDS,
     portPattern: ethPorts('Te1/0/', 1),
   }),
   device({

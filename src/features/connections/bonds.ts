@@ -1,3 +1,4 @@
+import { cmpId } from '../../utils/misc';
 import { getDefinition } from '../../data/catalog';
 import type { Bond, BondModeId, InfraEdge, InfraNode, IssueSeverity } from '../../types';
 import { str, uid } from '../../utils/misc';
@@ -34,7 +35,7 @@ export function modeInfo(mode: unknown): BondModeInfo {
 }
 
 export const bondMembers = (bondId: string, edges: InfraEdge[]): InfraEdge[] =>
-  edges.filter((e) => e.data?.bondId === bondId).sort((a, b) => a.id.localeCompare(b.id));
+  edges.filter((e) => e.data?.bondId === bondId).sort((a, b) => cmpId(a.id, b.id));
 
 export function bondTitle(bond: Bond): string {
   return bond.peerName && bond.peerName !== bond.name ? `${bond.name} / ${bond.peerName}` : bond.name;

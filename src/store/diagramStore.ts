@@ -151,7 +151,8 @@ export interface DiagramState {
   newProject: (templateId: string, name?: string) => void;
   importFile: (raw: unknown) => void;
   exportFile: () => ProjectFile;
-  save: () => void;
+  /** Save locally; `version` also records it in the history (autosaves: at most every few minutes). */
+  save: (version?: 'auto' | 'manual' | 'none') => void;
   saveAs: (name: string) => void;
   renameProject: (name: string) => void;
   setDescription: (d: string) => void;
@@ -887,10 +888,10 @@ export const useDiagram = create<DiagramState>((set, get) => {
       });
     },
 
-    save: () => {
+    save: (version = 'auto') => {
       const metadata = { ...get().metadata, updatedAt: now() };
       set({ metadata });
-      saveProjectFile(get().exportFile());
+      saveProjectFile(get().exportFile(), version);
       set({ dirty: false, savedAt: metadata.updatedAt });
     },
 

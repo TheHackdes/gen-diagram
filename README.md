@@ -15,7 +15,7 @@ On first launch a complete demo project ("Acme HQ") is created and opened.
 
 ## Highlights
 
-- **Multiple IP addresses**: every addressable node has a main IP plus a list of additional addresses (interface label + VLAN), shown on the card, included in validation (format, subnet, duplicates) and IP suggestions.
+- **Multiple IP addresses**: every addressable node has a list of addresses, all alike (interface label + VLAN), shown on the card, included in validation (format, subnet, duplicates) and IP suggestions.
 - **Integrated services**: routers (and firewalls) can enable an *integrated VPN gateway* (protocol, mode, endpoint, tunnel network); servers, VMs, LXC, hypervisors, Docker hosts and workstations can enable a *host firewall* (nftables, ufw, firewalld, Windows Defender Firewall, pf…). Cards show `VPN` / `FW` badges, links between two VPN-capable devices are detected as tunnels (`wg0`, `ipsec0`, `tun0`), and validation flags tunnels to devices without VPN and DMZ hosts without a host firewall. Capabilities are declared per role in `src/data/catalog/index.ts` and can be overridden per definition (`capabilities`).
 
 - **Integrated Wi-Fi**: routers and firewalls can also be access points (SSID, band, standard, security); links to laptops/phones become Wi-Fi links.
@@ -29,6 +29,12 @@ On first launch a complete demo project ("Acme HQ") is created and opened.
 - **Compact hosts**: hypervisors and Docker hosts have a *Compact view* (header button, properties panel or right-click): every VM, LXC or container becomes one line with only the essentials (name, type, IP, OS or image, VLAN, services); nested hosts become compact blocks. Choose what each line shows (type, IP, other IPs, hostname, OS/image, vCPU/RAM, ports, VLAN, services, description). Drag a line to reorder it; the surrounding zone shrinks to fit.
 - **Firewall rule tables on the right**: rule tables are docked to the right edge of the diagram and follow it as the diagram changes (option *Keep on the right of the diagram* on each table).
 - **Stacked addresses**: additional IPs and service details are listed one per line, on device cards and in host headers (the guests move down automatically).
+- **Rules linked to the diagram**: a rule's source or destination can point to a VLAN or a device instead of a typed address. It follows renumbering and address changes, shows the object's name in tables and exports, and is flagged when the object is deleted. A typed address that matches a VLAN or a device offers *Link to …*.
+- **Layer 2 checks**: switching loops between switches (bonds count as one link, stacks / MLAG / vPC pairs as one switch; graded by the new *Spanning tree* field) and VLANs that cannot reach their gateway because a trunk — or a hypervisor uplink, for its guests — does not carry them.
+- **Views and layers**: *View* menu with Everything, Physical, Network, Applications and Security views, plus a toggle per layer (network equipment, servers, VMs & containers, endpoints, zones, rules tables, notes, cabling, VPN tunnels, flows). The view is saved with the project and followed by presentation mode and image exports; the security view dims what does not filter traffic.
+- **Documentation**: *File → Export documentation* generates a self-contained HTML file (print it to PDF) or Markdown + PNG with the diagram, inventory, addressing plan per VLAN (with usage), VLANs, physical links, bonds, firewall rules, flows and validation issues.
+- **Version history**: projects live in IndexedDB. A version is recorded at each save and every 10 minutes while editing; *File → Version history* restores (keeping the current state), names, downloads or deletes versions. Projects from older versions are moved from localStorage automatically.
+- **Large diagrams**: cached geometry and labels, simplified cards and hidden link text when zoomed out on big diagrams (exports always use full detail), off-screen elements not rendered.
 
 ## Stack
 
@@ -43,7 +49,7 @@ src/
 │   ├── sidebar/       Component library + search, VLAN manager, layers outline
 │   ├── properties/    Dynamic properties panel, OS picker, link editor, validation issues
 │   ├── toolbar/       Top bar, status bar
-│   ├── dialogs/       Export, open project, templates, shortcuts, custom OS, confirm/prompt/toasts
+│   ├── dialogs/       Export, documentation, version history, open project, templates, shortcuts, custom OS, confirm/prompt/toasts
 │   ├── icons/         Icon registry (Lucide + brand marks)
 │   └── ui/            Buttons, menus, dialogs, form fields, tooltips
 ├── data/
@@ -51,12 +57,14 @@ src/
 │   ├── operatingSystems/  OS registry (windows.ts, linux.ts, other.ts)
 │   └── templates/     Template DSL + templates (demo, small office, Proxmox, 3-tier, enterprise)
 ├── features/
-│   ├── canvas/        Alignment guides, React Flow instance access
+│   ├── canvas/        Alignment guides, React Flow instance access, views & layers, level of detail
 │   ├── connections/   Link types + smart suggestions (type, ports, speed, VLAN, access/trunk)
 │   ├── layout/        Auto-layout (network, hierarchical, tree, force, grid; nested containers)
 │   ├── nodes/         Factory, hierarchy (nesting/reparenting), clipboard/group/align operations
-│   ├── projects/      JSON format, local storage, project commands
-│   ├── validation/    Consistency rules (IPs, subnets, VLANs, ports, isolated equipment)
+│   ├── projects/      JSON format, IndexedDB storage + version history, project commands
+│   ├── validation/    Consistency rules (IPs, subnets, VLANs, ports, bonds, L2 loops, VLAN reachability)
+│   ├── firewall/      Rules model, address references (VLAN / device)
+│   ├── docs/          Documentation model + Markdown / HTML rendering
 │   └── export/        PNG / SVG / PDF rendering
 ├── hooks/             Keyboard shortcuts, autosave, presentation mode
 ├── store/             diagramStore (document + undo/redo), uiStore (panels, dialogs, theme)
@@ -76,7 +84,7 @@ src/
 
 ## Known limitations
 
-- Projects are stored in the browser's localStorage. Use JSON export for backups and sharing; there is no server or multi-user editing.
+- Projects are stored in the browser (IndexedDB; localStorage without history when IndexedDB is unavailable). Use JSON export for backups and sharing; there is no server or multi-user editing.
 - SVG export embeds HTML text (`foreignObject`). It renders in browsers and most documentation tools, but some desktop vector editors (e.g. Inkscape) don't display it. Use PDF for those.
 - PDF export is a high-resolution raster image inside a PDF page, not vector content.
 - Auto-layout is a solid starting point; dense meshes may still need manual touch-ups.

@@ -289,6 +289,17 @@ export interface ProjectSettings {
   showEdgeLabels: boolean;
   showPortLabels: boolean;
   showMinimap: boolean;
+  /** Current view (hidden layers); absent = everything. */
+  view?: ViewSettings;
+}
+
+/** Layers of the diagram that a view can hide (see features/canvas/views). */
+export type LayerId = 'network' | 'compute' | 'virtual' | 'endpoints' | 'security' | 'zones' | 'rules' | 'notes' | 'cabling' | 'tunnels' | 'flows';
+export type ViewPreset = 'all' | 'physical' | 'network' | 'applications' | 'security' | 'custom';
+
+export interface ViewSettings {
+  preset: ViewPreset;
+  hidden: LayerId[];
 }
 
 export interface ProjectMetadata {

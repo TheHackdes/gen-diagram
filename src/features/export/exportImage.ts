@@ -1,5 +1,6 @@
 import { toPng, toSvg } from 'html-to-image';
 import { useDiagram } from '../../store/diagramStore';
+import { useUi } from '../../store/uiStore';
 import type { InfraNode } from '../../types';
 import { downloadBlob, slugify, uid } from '../../utils/misc';
 import { flowApi } from '../canvas/flowApi';
@@ -94,8 +95,9 @@ function withFamily(ids: Set<string>, nodes: InfraNode[]): Set<string> {
 function computeFrame(opts: ExportOptions, part: Part, flowEl: HTMLElement): Frame {
   const inst = flowApi.instance;
   if (!inst) throw new Error('Canvas not ready');
-  const nodes = inst.getNodes() as InfraNode[];
-  const edges = inst.getEdges();
+  // Only what the current view shows.
+  const nodes = (inst.getNodes() as InfraNode[]).filter((n) => !n.hidden);
+  const edges = inst.getEdges().filter((e) => !e.hidden);
   if (opts.area === 'viewport') {
     const { x, y, zoom } = inst.getViewport();
     return { width: flowEl.clientWidth, height: flowEl.clientHeight, transform: `translate(${x}px, ${y}px) scale(${zoom})` };
@@ -153,6 +155,15 @@ async function ensureRulesTable(): Promise<() => void> {
   return () => useDiagram.setState({ nodes: useDiagram.getState().nodes.filter((n) => n.id !== table.id), dirty });
 }
 
+function showRulesLayer(): () => void {
+  const st = useDiagram.getState();
+  const view = st.settings.view;
+  if (!view?.hidden.includes('rules')) return () => undefined;
+  const { settings, dirty } = st;
+  useDiagram.setState({ settings: { ...settings, view: { ...view, hidden: view.hidden.filter((l) => l !== 'rules') } } });
+  return () => useDiagram.setState({ settings, dirty });
+}
+
 interface Rendered {
   frame: Frame;
   png?: string;
@@ -176,8 +187,46 @@ async function dataUrlToBlob(url: string): Promise<Blob> {
   return (await fetch(url)).blob();
 }
 
+type Image = { part: Part; suffix: string } & Rendered;
+
 /** Render the diagram (without any UI chrome) and download it. */
 export async function exportDiagram(opts: ExportOptions): Promise<void> {
+  const { images, content } = await renderImages(opts);
+  const name = slugify(opts.filename);
+  if (opts.format === 'pdf') {
+    // One PDF; separate parts become separate pages.
+    const { jsPDF } = await import('jspdf');
+    const first = images[0].frame;
+    const pdf = new jsPDF({ orientation: first.width >= first.height ? 'landscape' : 'portrait', unit: 'px', format: [first.width, first.height], hotfixes: ['px_scaling'] });
+    images.forEach((img, i) => {
+      if (i > 0) pdf.addPage([img.frame.width, img.frame.height], img.frame.width >= img.frame.height ? 'landscape' : 'portrait');
+      pdf.addImage(img.png!, 'PNG', 0, 0, img.frame.width, img.frame.height, undefined, 'FAST');
+    });
+    pdf.setProperties({ title: opts.filename, creator: 'InfraCanvas' });
+    pdf.save(`${name}${content === 'rules' ? '-firewall-rules' : ''}.pdf`);
+    return;
+  }
+  for (const img of images) {
+    if (opts.format === 'svg') {
+      const svg = decodeURIComponent(img.svg!.replace(/^data:image\/svg\+xml;charset=utf-8,/, ''));
+      downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), `${name}${img.suffix}.svg`);
+    } else {
+      downloadBlob(await dataUrlToBlob(img.png!), `${name}${img.suffix}.png`);
+    }
+    // Browsers may drop a second download fired in the same tick.
+    if (images.length > 1) await new Promise((r) => setTimeout(r, 400));
+  }
+}
+
+/** PNG of the whole diagram as the current view shows it (for documentation). */
+export async function captureDiagram(theme: ExportTheme): Promise<{ png: string; width: number; height: number } | null> {
+  if (!useDiagram.getState().nodes.length) return null;
+  const { images } = await renderImages({ format: 'png', resolution: 'high', area: 'all', theme, background: 'theme', content: 'infrastructure', padding: 32, filename: '' });
+  const img = images[0];
+  return img?.png ? { png: img.png, width: img.frame.width, height: img.frame.height } : null;
+}
+
+async function renderImages(opts: ExportOptions): Promise<{ images: Image[]; content: ExportContent }> {
   const flowEl = document.querySelector<HTMLElement>('.react-flow');
   const viewport = document.querySelector<HTMLElement>('.react-flow__viewport');
   if (!flowEl || !viewport) throw new Error('Canvas not ready');
@@ -186,6 +235,13 @@ export async function exportDiagram(opts: ExportOptions): Promise<void> {
   if ((content === 'rules' || content === 'separate') && !hasRuleData) throw new Error('The diagram has no firewall rule yet.');
 
   // "Both" and rules exports show the rules even if no table is drawn on the diagram.
+  // Full detail and every element in the DOM while rendering (level of detail is for the screen only).
+  useUi.getState().setExporting(true);
+  flowApi.instance?.setViewport(flowApi.instance.getViewport());
+  for (let i = 0; i < 3; i++) await nextFrame();
+  // Rules asked for explicitly are exported even if the current view hides their tables.
+  const restoreView = content !== 'infrastructure' && hasRuleData ? showRulesLayer() : () => undefined;
+  for (let i = 0; i < 2; i++) await nextFrame();
   const cleanup = content !== 'infrastructure' && hasRuleData && opts.area === 'all' ? await ensureRulesTable() : () => undefined;
   // Force the chosen theme on the exported subtree and hide selection styles.
   const themeClass = opts.theme === 'dark' ? 'force-dark' : 'force-light';
@@ -200,36 +256,14 @@ export async function exportDiagram(opts: ExportOptions): Promise<void> {
             { part: 'rules', suffix: '-firewall-rules' },
           ]
         : [{ part: content, suffix: content === 'rules' ? '-firewall-rules' : '' }];
-    const images = [];
+    const images: Image[] = [];
     for (const p of parts) images.push({ ...p, ...(await render(opts, p.part, viewport, flowEl)) });
-    const name = slugify(opts.filename);
-
-    if (opts.format === 'pdf') {
-      // One PDF; separate parts become separate pages.
-      const { jsPDF } = await import('jspdf');
-      const first = images[0].frame;
-      const pdf = new jsPDF({ orientation: first.width >= first.height ? 'landscape' : 'portrait', unit: 'px', format: [first.width, first.height], hotfixes: ['px_scaling'] });
-      images.forEach((img, i) => {
-        if (i > 0) pdf.addPage([img.frame.width, img.frame.height], img.frame.width >= img.frame.height ? 'landscape' : 'portrait');
-        pdf.addImage(img.png!, 'PNG', 0, 0, img.frame.width, img.frame.height, undefined, 'FAST');
-      });
-      pdf.setProperties({ title: opts.filename, creator: 'InfraCanvas' });
-      pdf.save(`${name}${content === 'rules' ? '-firewall-rules' : ''}.pdf`);
-      return;
-    }
-    for (const img of images) {
-      if (opts.format === 'svg') {
-        const svg = decodeURIComponent(img.svg!.replace(/^data:image\/svg\+xml;charset=utf-8,/, ''));
-        downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), `${name}${img.suffix}.svg`);
-      } else {
-        downloadBlob(await dataUrlToBlob(img.png!), `${name}${img.suffix}.png`);
-      }
-      // Browsers may drop a second download fired in the same tick.
-      if (images.length > 1) await new Promise((r) => setTimeout(r, 400));
-    }
+    return { images, content };
   } finally {
     flowEl.classList.remove('exporting', themeClass);
     cleanup();
+    restoreView();
+    useUi.getState().setExporting(false);
   }
 }
 

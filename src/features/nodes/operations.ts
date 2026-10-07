@@ -3,6 +3,7 @@ import { getDefinition } from '../../data/catalog';
 import type { InfraEdge, InfraNode } from '../../types';
 import { formatIPv4, parseCidr, parseIPv4 } from '../../utils/ip';
 import { str, uid } from '../../utils/misc';
+import { remapNodeRefs } from '../firewall/addresses';
 import { createNode, uniqueName } from './factory';
 import { allIps } from './ips';
 import { absolutePosition, descendantIds, indexById, nodeSize, sortByHierarchy } from './hierarchy';
@@ -115,6 +116,13 @@ export function pasteClipboard(
         return { ...e, address };
       });
     }
+    if (Array.isArray(props.fwRules))
+      props.fwRules = (props.fwRules as { source?: string; destination?: string }[]).map((r) => ({
+        ...r,
+        source: remapNodeRefs(r.source ?? '', idMap),
+        destination: remapNodeRefs(r.destination ?? '', idMap),
+      }));
+    if (typeof props.scope === 'string') props.scope = idMap.get(props.scope) ?? props.scope;
     const tunnel = str(props.vpnIp);
     if (tunnel && ips.has(tunnel)) props.vpnIp = nextFreeIp(tunnel, ips);
     if (str(props.vpnIp)) ips.add(str(props.vpnIp));

@@ -5,7 +5,7 @@ export type Theme = 'light' | 'dark';
 export type View = 'home' | 'workspace';
 export type LeftTab = 'library' | 'networks' | 'layers';
 export type RightTab = 'properties' | 'issues';
-export type DialogId = 'export' | 'open' | 'templates' | 'shortcuts' | 'customOs' | null;
+export type DialogId = 'export' | 'open' | 'templates' | 'shortcuts' | 'customOs' | 'history' | 'docs' | null;
 
 export interface Toast {
   id: number;
@@ -57,6 +57,9 @@ interface UiState {
   toasts: Toast[];
   contextMenu: ContextMenuState | null;
   zoom: number;
+  /** An image export is rendering: full detail, every element in the DOM. */
+  exporting: boolean;
+  setExporting: (on: boolean) => void;
   /** Node whose firewall rules are open in the wide editor. */
   rulesFor: string | null;
   openRules: (nodeId: string | null) => void;
@@ -78,7 +81,7 @@ interface UiState {
 }
 
 function initialTheme(): Theme {
-  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  return typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 
 let toastId = 0;
@@ -102,6 +105,8 @@ export const useUi = create<UiState>((set, get) => ({
   toasts: [],
   contextMenu: null,
   zoom: 1,
+  exporting: false,
+  setExporting: (exporting) => set({ exporting }),
   rulesFor: null,
   openRules: (rulesFor) => set({ rulesFor }),
   setTheme: (theme) => {

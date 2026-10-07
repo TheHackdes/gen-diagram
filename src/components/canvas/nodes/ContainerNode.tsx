@@ -2,6 +2,7 @@ import type { NodeProps } from '@xyflow/react';
 import { LayoutGrid, Lock, Rows3 } from 'lucide-react';
 import { memo } from 'react';
 import { colorOf, getDefinition } from '../../../data/catalog';
+import { nodeIndex } from '../../../features/nodes/hierarchy';
 import { useDiagram } from '../../../store/diagramStore';
 import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
@@ -17,10 +18,10 @@ const RUNS_ON: Record<string, string> = { vm: 'VM', physical: 'Bare metal', lxc:
 function ContainerNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) {
   const inCompact = useInCompactHost(parentId);
   const show = useCompactFields(parentId);
-  const setCompact = useDiagram((s) => s.setCompact);
+  const { setCompact } = useDiagram.getState();
   const def = getDefinition(data.type);
   const color = data.color ?? colorOf(def);
-  const childCount = useDiagram((s) => s.nodes.reduce((acc, n) => acc + (n.parentId === id ? 1 : 0), 0));
+  const childCount = useDiagram((s) => nodeIndex(s.nodes).childCount.get(id) ?? 0);
   const addresses = shownAddresses(data.props);
   const joined = addresses.map((a) => a.address).join(' · ');
   const hiddenCount = hiddenAddressCount(data.props);

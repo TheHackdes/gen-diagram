@@ -1,5 +1,7 @@
+import { cmpId } from '../../../utils/misc';
 import { Position, type InternalNode, type ReactFlowState } from '@xyflow/react';
-import { linkLabel } from '../../../features/connections/labels';
+import { labelIndex } from '../../../features/connections/labels';
+import { hideLinkText } from '../../../features/canvas/lod';
 import { useDiagram } from '../../../store/diagramStore';
 import type { InfraEdge, InfraNode } from '../../../types';
 
@@ -59,13 +61,46 @@ interface Endpoint {
  * Where every link attaches on a node: links sharing a side are spread along it,
  * ordered by the position of their far end so they never cross near the node.
  */
+const adjacencyCache = new WeakMap<object, Map<string, InfraEdge[]>>();
+
+/** Links of each node, rebuilt only when the list of links changes. */
+function adjacency(edges: InfraEdge[]): Map<string, InfraEdge[]> {
+  let adj = adjacencyCache.get(edges);
+  if (adj) return adj;
+  adj = new Map();
+  for (const e of edges) {
+    for (const id of [e.source, e.target]) {
+      const list = adj.get(id);
+      if (list) list.push(e);
+      else adj.set(id, [e]);
+    }
+  }
+  adjacencyCache.set(edges, adj);
+  return adj;
+}
+
+/** Per canvas state: every edge renders from the same computation (no O(n²) per frame). */
+const endpointCache = new WeakMap<ReactFlowState, Map<string, Endpoint[]>>();
+
 function endpointsOf(s: ReactFlowState, nodeId: string): Endpoint[] {
+  let perState = endpointCache.get(s);
+  if (!perState) {
+    perState = new Map();
+    endpointCache.set(s, perState);
+  }
+  const cached = perState.get(nodeId);
+  if (cached) return cached;
+  const out = computeEndpoints(s, nodeId);
+  perState.set(nodeId, out);
+  return out;
+}
+
+function computeEndpoints(s: ReactFlowState, nodeId: string): Endpoint[] {
   const self = s.nodeLookup.get(nodeId) as Node | undefined;
   if (!self) return [];
   const b = box(self);
   const items: Omit<Endpoint, 'index' | 'count' | 'point'>[] = [];
-  for (const e of s.edges as InfraEdge[]) {
-    if (e.source !== nodeId && e.target !== nodeId) continue;
+  for (const e of adjacency(s.edges as InfraEdge[]).get(nodeId) ?? []) {
     const other = s.nodeLookup.get(e.source === nodeId ? e.target : e.source) as Node | undefined;
     if (!other) continue;
     const [side] = floatingSides(self, other);
@@ -74,7 +109,7 @@ function endpointsOf(s: ReactFlowState, nodeId: string): Endpoint[] {
   }
   const out: Endpoint[] = [];
   for (const pos of [Position.Top, Position.Right, Position.Bottom, Position.Left]) {
-    const same = items.filter((i) => i.side.pos === pos).sort((p, q) => p.key - q.key || p.edge.id.localeCompare(q.edge.id));
+    const same = items.filter((i) => i.side.pos === pos).sort((p, q) => p.key - q.key || cmpId(p.edge.id, q.edge.id));
     const count = same.length;
     const length = isVertical(pos) ? b.w : b.h;
     const span = count > 1 ? Math.min(length * 0.75, (count - 1) * (count <= 3 ? 56 : 22)) : 0;
@@ -100,7 +135,7 @@ function bendShift(mine: Endpoint, all: Endpoint[], self: Node): number {
   const before = (e: Endpoint) => e.key < centre;
   const group = sameSide.filter((e) => before(e) === before(mine));
   // Outer first: ascending for the "before" group, descending for the "after" group.
-  group.sort((p, q) => (before(mine) ? p.key - q.key || p.edge.id.localeCompare(q.edge.id) : q.key - p.key || q.edge.id.localeCompare(p.edge.id)));
+  group.sort((p, q) => (before(mine) ? p.key - q.key || cmpId(p.edge.id, q.edge.id) : q.key - p.key || cmpId(q.edge.id, p.edge.id)));
   const rank = group.findIndex((e) => e.edge.id === mine.edge.id);
   if (group.length < 2 || rank < 0) return 0;
   const outward = mine.side.pos === Position.Bottom || mine.side.pos === Position.Right ? 1 : -1;
@@ -117,7 +152,21 @@ export interface Geometry {
   marks: { x: number; y: number; rx: number; ry: number }[];
 }
 
+const geometryCache = new WeakMap<ReactFlowState, Map<string, Geometry | null>>();
+
 export function geometry(s: ReactFlowState, id: string, source: string, target: string): Geometry | null {
+  let perState = geometryCache.get(s);
+  if (!perState) {
+    perState = new Map();
+    geometryCache.set(s, perState);
+  }
+  if (perState.has(id)) return perState.get(id)!;
+  const g = computeGeometry(s, id, source, target);
+  perState.set(id, g);
+  return g;
+}
+
+function computeGeometry(s: ReactFlowState, id: string, source: string, target: string): Geometry | null {
   const src = s.nodeLookup.get(source) as Node | undefined;
   const tgt = s.nodeLookup.get(target) as Node | undefined;
   if (!src || !tgt) return null;
@@ -132,7 +181,7 @@ export function geometry(s: ReactFlowState, id: string, source: string, target: 
     for (const end of [a, b]) {
       const list = end === a ? atSource : atTarget;
       const members = list.filter((e) => e.edge.data?.bondId === bondId && e.side.pos === end.side.pos);
-      if (members.length < 2 || members.sort((p, q) => p.edge.id.localeCompare(q.edge.id))[0].edge.id !== id) continue;
+      if (members.length < 2 || members.sort((p, q) => cmpId(p.edge.id, q.edge.id))[0].edge.id !== id) continue;
       const vertical = isVertical(end.side.pos);
       const coords = members.map((m) => (vertical ? m.point.x : m.point.y));
       const lo = Math.min(...coords);
@@ -186,25 +235,26 @@ export function labelPositions(s: ReactFlowState): Map<string, { x: number; y: n
   const hit = cache.get(s);
   if (hit && hit.diagram === diagram) return hit.result;
   const result = new Map<string, { x: number; y: number }>();
-  if (diagram.settings.showEdgeLabels) {
-    const obstacles: Rect[] = [];
+  // Labels are not drawn at a very small zoom (level of detail): nothing to place.
+  if (diagram.settings.showEdgeLabels && !hideLinkText(s.transform[2])) {
+    const grid = new SpatialGrid();
+    const obstacles = new SpatialGrid();
     for (const n of s.nodeLookup.values()) {
-      if (!OBSTACLES.has(n.type ?? '')) continue;
+      if (!OBSTACLES.has(n.type ?? '') || n.hidden) continue;
       const b = box(n as Node);
-      obstacles.push({ x: b.x, y: b.y, w: b.w, h: b.h });
+      obstacles.add({ x: b.x, y: b.y, w: b.w, h: b.h });
     }
-    const placed: Rect[] = [];
-    const edges = (s.edges as InfraEdge[]).slice().sort((p, q) => p.id.localeCompare(q.id));
+    const labels = labelIndex(diagram.edges, diagram.bonds);
+    const byId = new Map(diagram.edges.map((e) => [e.id, e]));
+    const edges = (s.edges as InfraEdge[]).slice().sort((p, q) => cmpId(p.id, q.id));
     for (const e of edges) {
-      const data = diagram.edges.find((x) => x.id === e.id);
-      if (!data) continue;
-      const text = linkLabel(data, diagram.edges, diagram.bonds);
+      const info = labels.get(e.id);
+      const data = byId.get(e.id);
+      if (!info?.owner || !data || e.hidden) continue;
+      const text = info.text;
       const vlan = (data.data?.vlan ?? '').split(/[\s,]+/).filter(Boolean);
       const extra = vlan.length ? `${data.data?.mode === 'trunk' ? ' · trunk ' : ' · VLAN '}${vlan.join(',')}` : data.data?.mode === 'trunk' ? ' · trunk' : '';
       if (!text && !extra && data.data?.connType !== 'vpn') continue;
-      // Only the first link of a bundle carries the label.
-      const k = [e.source, e.target].sort().join('|');
-      if (edges.find((x) => [x.source, x.target].sort().join('|') === k)?.id !== e.id) continue;
       const g = geometry(s, e.id, e.source, e.target);
       if (!g || Math.hypot(g.b.x - g.a.x, g.b.y - g.a.y) < 90) continue;
       const w = (text + extra).length * 5.4 + 16 + (data.data?.connType === 'vpn' ? 12 : 0);
@@ -222,15 +272,40 @@ export function labelPositions(s: ReactFlowState): Map<string, { x: number; y: n
       let chosen = candidates[0];
       for (const c of candidates) {
         const r = { x: c[0] - w / 2, y: c[1] - h / 2, w, h };
-        if (!placed.some((p) => overlaps(p, r)) && !obstacles.some((o) => overlaps(o, r, 0))) {
+        if (!grid.hits(r, 3) && !obstacles.hits(r, 0)) {
           chosen = c;
           break;
         }
       }
-      placed.push({ x: chosen[0] - w / 2, y: chosen[1] - h / 2, w, h });
+      grid.add({ x: chosen[0] - w / 2, y: chosen[1] - h / 2, w, h });
       result.set(e.id, { x: chosen[0], y: chosen[1] });
     }
   }
   cache.set(s, { diagram, result });
   return result;
+}
+
+
+/** Uniform grid of rectangles: overlap tests only look at nearby cells. */
+class SpatialGrid {
+  private cells = new Map<string, Rect[]>();
+  private static SIZE = 240;
+  private keys(r: Rect): string[] {
+    const out: string[] = [];
+    const S = SpatialGrid.SIZE;
+    for (let gx = Math.floor(r.x / S); gx <= Math.floor((r.x + r.w) / S); gx++)
+      for (let gy = Math.floor(r.y / S); gy <= Math.floor((r.y + r.h) / S); gy++) out.push(`${gx},${gy}`);
+    return out;
+  }
+  add(r: Rect): void {
+    for (const k of this.keys(r)) {
+      const list = this.cells.get(k);
+      if (list) list.push(r);
+      else this.cells.set(k, [r]);
+    }
+  }
+  hits(r: Rect, margin: number): boolean {
+    for (const k of this.keys(r)) for (const o of this.cells.get(k) ?? []) if (overlaps(o, r, margin)) return true;
+    return false;
+  }
 }

@@ -18,9 +18,12 @@ import {
   Undo2,
   Upload,
   Wand2,
+  History,
+  FileText,
 } from 'lucide-react';
 import { LAYOUT_ALGORITHMS } from '../../features/layout/autoLayout';
 import { projectActions } from '../../features/projects/actions';
+import { ViewMenu } from './ViewMenu';
 import { useDiagram } from '../../store/diagramStore';
 import { useUi } from '../../store/uiStore';
 import { modKey } from '../../utils/misc';
@@ -57,10 +60,12 @@ export function TopBar() {
     { id: 'save', label: 'Save', icon: <Save size={14} />, shortcut: `${modKey}S`, onSelect: projectActions.save },
     { id: 'saveas', label: 'Save as…', icon: <Save size={14} />, shortcut: `${modKey}⇧S`, onSelect: projectActions.saveAs },
     { id: 'dup', label: 'Duplicate project', icon: <Copy size={14} />, onSelect: projectActions.duplicate },
+    { id: 'history', label: 'Version history…', icon: <History size={14} />, onSelect: () => ui.openDialog('history') },
     'separator',
     { id: 'import', label: 'Import JSON…', icon: <Upload size={14} />, onSelect: projectActions.importJson },
     { id: 'exportjson', label: 'Export JSON', icon: <FileBraces size={14} />, onSelect: projectActions.exportJson },
     { id: 'export', label: 'Export image…', icon: <Download size={14} />, shortcut: `${modKey}E`, onSelect: () => ui.openDialog('export') },
+    { id: 'docs', label: 'Export documentation…', icon: <FileText size={14} />, onSelect: () => ui.openDialog('docs') },
     'separator',
     { id: 'home', label: 'All projects', icon: <House size={14} />, onSelect: () => projectActions.guardUnsaved(() => ui.setView('home')) },
   ];
@@ -106,6 +111,7 @@ export function TopBar() {
           </Button>
         )}
       />
+      <ViewMenu />
       <Button variant="ghost" size="sm" icon={<LayoutTemplate size={15} />} onClick={() => ui.openDialog('templates')} className="hidden lg:inline-flex">
         Templates
       </Button>

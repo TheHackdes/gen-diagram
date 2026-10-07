@@ -3,6 +3,7 @@ import { colorOf, getDefinition } from '../../../data/catalog';
 import { shownAddresses } from '../../../features/nodes/ips';
 import { useDiagram } from '../../../store/diagramStore';
 import { compactFieldsOf, compactHostAbove, type CompactField } from '../../../features/nodes/compact';
+import { nodeIndex } from '../../../features/nodes/hierarchy';
 import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
 import { Icon } from '../../icons/Icon';
@@ -12,10 +13,11 @@ import { CapabilityBadges, EditableName, NodeHandles, OsChip, VlanChips } from '
 /** Is a node (through its parents) inside a host shown in compact view? */
 export function useInCompactHost(parentId: string | undefined): boolean {
   return useDiagram((s) => {
+    const { byId } = nodeIndex(s.nodes);
     let pid = parentId;
     let guard = 0;
     while (pid && guard++ < 20) {
-      const p = s.nodes.find((n) => n.id === pid);
+      const p = byId.get(pid);
       if (!p) return false;
       if (p.data.props.compact === true) return true;
       pid = p.parentId;

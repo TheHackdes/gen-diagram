@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, ChevronDown, Maximize2, Plus, Table, Trash } from 'lucide-react';
 import { useState } from 'react';
+import type { ResolvedAddress } from '../../../features/firewall/addresses';
 import { addressProblem, describeRule, isValidPorts, RULE_PRESETS } from '../../../features/firewall/rules';
 import { absolutePosition, indexById, nodeSize } from '../../../features/nodes/hierarchy';
 import { useDiagram } from '../../../store/diagramStore';
@@ -8,12 +9,16 @@ import type { FirewallRule, InfraNode } from '../../../types';
 import { Button, IconButton } from '../../ui/Button';
 import { cn } from '../../ui/cn';
 import { FieldRow, Input } from '../../ui/Field';
-import { AddressField } from './AddressField';
+import { AddressField, useAddressResolver } from './AddressField';
 import { ActionToggle, DIRECTIONS, PortsField, PROTOCOL_OPTIONS, SegmentedSmall } from './RuleControls';
 import { useRules } from './useRules';
 
-const hasProblem = (r: FirewallRule) =>
-  !!addressProblem(r.source) || !!addressProblem(r.destination) || (['tcp', 'udp', 'tcp/udp'].includes(r.protocol) && !isValidPorts(r.ports));
+const hasProblem = (r: FirewallRule, resolve: (v: string) => ResolvedAddress) =>
+  !!addressProblem(r.source) ||
+  !!addressProblem(r.destination) ||
+  resolve(r.source).kind === 'missing' ||
+  resolve(r.destination).kind === 'missing' ||
+  (['tcp', 'udp', 'tcp/udp'].includes(r.protocol) && !isValidPorts(r.ports));
 
 function RuleEditor({ node, rule, onChange }: { node: InfraNode; rule: FirewallRule; onChange: (p: Partial<FirewallRule>) => void }) {
   const id = (k: string) => `rule-${rule.id}-${k}`;
@@ -40,6 +45,7 @@ function RuleEditor({ node, rule, onChange }: { node: InfraNode; rule: FirewallR
 /** Firewall rules in the properties panel: readable list, one rule edited at a time. */
 export function FirewallRulesSection({ node }: { node: InfraNode }) {
   const { rules, add, change, move, remove } = useRules(node);
+  const resolve = useAddressResolver();
   const [open, setOpen] = useState<string | null>(null);
 
   const addAndEdit = (partial: Partial<FirewallRule> = {}) => setOpen(add(partial).id);
@@ -70,7 +76,7 @@ export function FirewallRulesSection({ node }: { node: InfraNode }) {
       ) : (
         <ol className="mb-2 space-y-1">
           {rules.map((r, i) => {
-            const d = describeRule(r);
+            const d = describeRule(r, (v) => resolve(v).label);
             const expanded = open === r.id;
             return (
               <li key={r.id} className={cn('overflow-hidden rounded-lg border', expanded ? 'border-line-strong shadow-sm' : 'border-line', !r.enabled && 'opacity-60')}>
@@ -91,7 +97,7 @@ export function FirewallRulesSection({ node }: { node: InfraNode }) {
                   >
                     <span className={cn('mt-1 h-2 w-2 shrink-0 rounded-full', r.action === 'allow' ? 'bg-emerald-500' : 'bg-red-500')} />
                     <span className="min-w-0 flex-1 leading-tight">
-                      <span className={cn('block truncate text-[12px] font-medium', hasProblem(r) ? 'text-danger' : 'text-fg')}>
+                      <span className={cn('block truncate text-[12px] font-medium', hasProblem(r, resolve) ? 'text-danger' : 'text-fg')}>
                         {i + 1}. {d.head}
                       </span>
                       <span className="block truncate font-mono text-[10.5px] text-muted">{d.flow}</span>

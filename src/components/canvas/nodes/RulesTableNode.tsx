@@ -1,7 +1,8 @@
 import type { NodeProps } from '@xyflow/react';
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { colorOf, getDefinition } from '../../../data/catalog';
+import { isReference, resolveAddress, type ResolvedAddress } from '../../../features/firewall/addresses';
 import { formatPorts, hasRules, rulesOf } from '../../../features/firewall/rules';
 import { useDiagram } from '../../../store/diagramStore';
 import type { InfraNode } from '../../../types';
@@ -12,6 +13,19 @@ import { NodeHandles, Resizer } from './shared';
 
 const DIR: Record<string, string> = { in: 'In', out: 'Out', forward: 'Fwd' };
 
+/** A literal address, or the name of the referenced VLAN / device (with the VLAN's subnet). */
+function AddressCell({ value, refs }: { value: string; refs: Map<string, ResolvedAddress> }) {
+  const r = refs.get(value);
+  if (!r) return <span className="font-mono text-fg">{value}</span>;
+  if (r.kind === 'missing') return <span className="text-danger">{r.label}</span>;
+  return (
+    <span className="text-fg" title={r.detail}>
+      {r.label}
+      {r.kind === 'vlan' && r.detail && <span className="ml-1 font-mono text-subtle">{r.detail}</span>}
+    </span>
+  );
+}
+
 /** Firewall rules of one device (or all devices) rendered as a table on the canvas. */
 function RulesTableNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
   const scope = str(data.props.scope) || 'all';
@@ -20,6 +34,20 @@ function RulesTableNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
     useShallow((s) => s.nodes.filter((n) => hasRules(n) && (scope === 'all' || n.id === scope) && rulesOf(n.data.props).length > 0)),
   );
   const missing = useDiagram((s) => scope !== 'all' && !s.nodes.some((n) => n.id === scope));
+  // Names of the referenced VLANs / devices, as one string so that unrelated edits do not re-render.
+  const refKey = useDiagram((s) => {
+    const out: string[] = [];
+    for (const n of devices)
+      for (const r of rulesOf(n.data.props))
+        for (const v of [r.source, r.destination]) if (isReference(v)) out.push(v, JSON.stringify(resolveAddress(v, s.nodes, s.vlans)));
+    return out.join('\n');
+  });
+  const refs = useMemo(() => {
+    const m = new Map<string, ResolvedAddress>();
+    const parts = refKey ? refKey.split('\n') : [];
+    for (let i = 0; i < parts.length; i += 2) m.set(parts[i], JSON.parse(parts[i + 1]) as ResolvedAddress);
+    return m;
+  }, [refKey]);
   const groups = devices.map((n) => ({ node: n, rules: rulesOf(n.data.props).filter((r) => showDisabled || r.enabled) })).filter((g) => g.rules.length);
 
   return (
@@ -75,8 +103,12 @@ function RulesTableNodeImpl({ id, data, selected }: NodeProps<InfraNode>) {
                       </span>
                     </td>
                     <td className="px-2 py-1 text-muted">{DIR[r.direction]}</td>
-                    <td className="px-2 py-1 font-mono text-fg">{r.source}</td>
-                    <td className="px-2 py-1 font-mono text-fg">{r.destination}</td>
+                    <td className="px-2 py-1">
+                      <AddressCell value={r.source} refs={refs} />
+                    </td>
+                    <td className="px-2 py-1">
+                      <AddressCell value={r.destination} refs={refs} />
+                    </td>
                     <td className="px-2 py-1 text-muted uppercase">{r.protocol}</td>
                     <td className="px-2 py-1 font-mono text-fg">{formatPorts(r)}</td>
                     <td className="px-2 py-1 text-muted">{r.comment}</td>

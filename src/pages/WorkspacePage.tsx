@@ -12,6 +12,8 @@ import { LeftSidebar } from '../components/sidebar/LeftSidebar';
 import { StatusBar } from '../components/toolbar/StatusBar';
 import { TopBar } from '../components/toolbar/TopBar';
 import { cn } from '../components/ui/cn';
+import { DocsDialog } from '../components/dialogs/DocsDialog';
+import { VersionHistoryDialog } from '../components/dialogs/VersionHistoryDialog';
 import { useAutosave } from '../hooks/useAutosave';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { useDockedTables } from '../hooks/useDockedTables';
@@ -94,6 +96,8 @@ export function WorkspacePage() {
       </div>
       <ExportDialog />
       <OpenProjectDialog />
+      <VersionHistoryDialog />
+      <DocsDialog />
       <TemplatesDialog />
       <ShortcutsDialog />
       <CustomOsDialog />

@@ -1,3 +1,4 @@
+import { nodeRef } from '../../../features/firewall/addresses';
 import { insertRule, newRule, rulesOf } from '../../../features/firewall/rules';
 import { allIps } from '../../../features/nodes/ips';
 import { useDiagram } from '../../../store/diagramStore';
@@ -8,9 +9,9 @@ export function useRules(node: InfraNode) {
   const update = useDiagram((s) => s.updateNodeProps);
   const rules = rulesOf(node.data.props);
   const write = (next: FirewallRule[]) => update(node.id, { fwRules: next });
-  // A host firewall protects the host itself: its single address, or all of them ("any").
+  // A host firewall protects the host itself: a link to the device covers all its addresses.
   const own = allIps(node.data.props).filter((e) => e.address);
-  const defaultDestination = node.data.props.fw === true && own.length === 1 ? own[0].address : 'any';
+  const defaultDestination = node.data.props.fw === true && own.length ? nodeRef(node) : 'any';
   return {
     rules,
     add: (partial: Partial<FirewallRule> = {}): FirewallRule => {

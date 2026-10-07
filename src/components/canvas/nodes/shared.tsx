@@ -28,8 +28,8 @@ export function NodeHandles({ nodeId, connectable = true }: { nodeId: string; co
 }
 
 export function Resizer({ id, selected, minWidth = 120, minHeight = 40, locked }: { id: string; selected?: boolean; minWidth?: number; minHeight?: number; locked?: boolean }) {
-  const checkpoint = useDiagram((s) => s.checkpoint);
-  const refreshCompact = useDiagram((s) => s.refreshCompact);
+  // Actions are read when used: subscribing would re-run selectors on every change for every node.
+  const { checkpoint, refreshCompact } = useDiagram.getState();
   return (
     <NodeResizer
       isVisible={!!selected && !locked}
@@ -61,8 +61,7 @@ export function EditableName({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
-  const updateNode = useDiagram((s) => s.updateNode);
-  const updateProps = useDiagram((s) => s.updateNodeProps);
+  const { updateNode, updateNodeProps: updateProps } = useDiagram.getState();
   const ref = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
 
   useEffect(() => {

@@ -1,3 +1,4 @@
+import { cmpId } from '../../utils/misc';
 import type { InfraEdge } from '../../types';
 
 /** Several links drawn between the same two devices (a visual bundle). */
@@ -7,7 +8,7 @@ const pairKey = (e: Pick<InfraEdge, 'source' | 'target'>) => [e.source, e.target
 /** All links between the same two nodes as `edge` (including itself), in a stable order. */
 export function parallelEdges(edges: InfraEdge[], edge: Pick<InfraEdge, 'source' | 'target'>): InfraEdge[] {
   const key = pairKey(edge);
-  return edges.filter((e) => pairKey(e) === key).sort((a, b) => a.id.localeCompare(b.id));
+  return edges.filter((e) => pairKey(e) === key).sort((a, b) => cmpId(a.id, b.id));
 }
 
 /** "10 Gbps" → 10000 (Mbps), for capacity sums. */

@@ -11,6 +11,8 @@ export interface MenuItem {
   danger?: boolean;
   disabled?: boolean;
   checked?: boolean;
+  /** Toggles: the menu stays open. */
+  keepOpen?: boolean;
   onSelect?: () => void;
 }
 
@@ -63,10 +65,11 @@ export function MenuList({ items, onClose, className }: MenuListProps) {
           <button
             key={item.id}
             type="button"
-            role="menuitem"
+            role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+            aria-checked={item.checked}
             disabled={item.disabled}
             onClick={() => {
-              onClose();
+              if (!item.keepOpen) onClose();
               item.onSelect?.();
             }}
             className={cn(

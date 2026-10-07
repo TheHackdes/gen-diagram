@@ -35,3 +35,6 @@ export function isTypingTarget(el: EventTarget | null): boolean {
   const tag = el.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
 }
+
+/** Fast ordering of technical ids (locale-aware compare is ~10× slower and useless here). */
+export const cmpId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
