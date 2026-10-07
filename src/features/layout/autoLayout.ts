@@ -5,6 +5,7 @@ import { CATEGORIES } from '../../data/categories';
 import { getDefinition, isContainerDef } from '../../data/catalog';
 import type { InfraEdge, InfraNode, LayoutAlgorithm, NodeRole } from '../../types';
 import { nodeSize, sortByHierarchy } from '../nodes/hierarchy';
+import { arrangementOf, columnsFor, compactColumns, isArranged, linesPerColumn } from '../nodes/arrange';
 import { childTop, COMPACT_ROW, isCompactHost, requiredHeight } from '../nodes/ips';
 import { str } from '../../utils/misc';
 
@@ -211,30 +212,106 @@ function sortForGrid(items: InfraNode[]): InfraNode[] {
 const COMPACT_PAD = 10;
 const COMPACT_GAP = 4;
 const COMPACT_MIN_WIDTH = 360;
+const COMPACT_COL_GAP = 12;
+const COMPACT_COL_MIN = 300;
 
 /**
  * Compact host: every guest is a full-width line, stacked in their current
  * vertical order (so dragging a line up or down reorders it). Nested hosts
- * (a Docker host in Proxmox) become compact blocks with their own lines.
+ * and zones (a Docker host in Proxmox) become compact blocks with their own
+ * lines. A group arranged as a grid splits its lines into columns.
  */
 function compactLayout(parent: InfraNode, ctx: Ctx, width: number, nested: boolean): number {
-  const kids = (ctx.children.get(parent.id) ?? [])
-    .slice()
-    .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x);
-  const rowWidth = width - COMPACT_PAD * 2;
-  let y = childTop(parent, nested);
-  for (const k of kids) {
+  const a = arrangementOf(parent);
+  const all = (ctx.children.get(parent.id) ?? []).slice();
+  const cols = nested ? 1 : compactColumns(a, all.length);
+  const inner = width - COMPACT_PAD * 2;
+  const colWidth = cols > 1 ? Math.floor((inner - COMPACT_COL_GAP * (cols - 1)) / cols) : inner;
+  const pitch = colWidth + COMPACT_COL_GAP;
+  // Column nearest to where the line is (dragging sideways moves it to another column).
+  const col = (k: InfraNode) => (cols > 1 ? Math.max(0, Math.min(cols - 1, Math.round((k.position.x - COMPACT_PAD) / pitch))) : 0);
+  const kids = all.sort((p, q) => col(p) - col(q) || p.position.y - q.position.y || p.position.x - q.position.x);
+  const perCol = cols > 1 ? linesPerColumn(a, kids.length) : Math.max(1, kids.length);
+  const top = childTop(parent, nested);
+  let y = top;
+  let bottom = top;
+  kids.forEach((k, i) => {
+    if (i % perCol === 0) y = top;
     const def = getDefinition(k.data.type);
-    const height = def.kind === 'container' || (ctx.children.get(k.id)?.length ?? 0) > 0 ? compactLayout(k, ctx, rowWidth, true) : COMPACT_ROW;
-    ctx.sizes.set(k.id, { width: rowWidth, height });
+    const block = def.kind === 'container' || def.renderer === 'zone' || (ctx.children.get(k.id)?.length ?? 0) > 0;
+    let size: Size;
+    if (block) size = { width: colWidth, height: compactLayout(k, ctx, colWidth, true) };
+    else if (def.renderer === 'device') size = { width: colWidth, height: COMPACT_ROW };
+    // Notes, text, tables… keep their own size.
+    else size = { width: Math.min(ctx.sizes.get(k.id)!.width, colWidth), height: ctx.sizes.get(k.id)!.height };
+    ctx.sizes.set(k.id, size);
     ctx.resized.add(k.id);
-    ctx.positions.set(k.id, { x: COMPACT_PAD, y });
-    y += height + COMPACT_GAP;
-  }
-  const height = kids.length ? y - COMPACT_GAP + COMPACT_PAD : childTop(parent, nested) + (nested ? 6 : 60);
+    ctx.positions.set(k.id, { x: COMPACT_PAD + Math.floor(i / perCol) * pitch, y });
+    y += size.height + COMPACT_GAP;
+    bottom = Math.max(bottom, y - COMPACT_GAP);
+  });
+  const height = kids.length ? bottom + COMPACT_PAD : top + (nested ? 6 : 60);
   ctx.sizes.set(parent.id, { width, height });
   ctx.resized.add(parent.id);
   return height;
+}
+
+/**
+ * Arranged group: members placed as a list, a row or a grid, in their current
+ * reading order (so dragging a member elsewhere reorders it). Columns take
+ * the width of their widest member and rows the height of their tallest.
+ */
+function arrangeLayout(parent: InfraNode, ctx: Ctx, byId: Map<string, InfraNode>, deep: boolean): void {
+  const a = arrangementOf(parent);
+  const kids = (ctx.children.get(parent.id) ?? []).slice();
+  if (!kids.length) {
+    ctx.sizes.set(parent.id, nodeSize(parent));
+    return;
+  }
+  for (const k of kids) restoreCardSize(k, ctx);
+  if (deep) for (const k of kids) if (ctx.children.get(k.id)?.length) layoutContainer(k, ctx, byId, deep);
+  const size = (k: InfraNode) => ctx.sizes.get(k.id)!;
+  const top = childTop(parent);
+  const cols = Math.min(columnsFor(a, kids.length), kids.length);
+
+  // Reading order, from the cell each member's center currently falls in.
+  const pitchX = Math.max(...kids.map((k) => size(k).width)) + a.gap;
+  const pitchY = Math.max(...kids.map((k) => size(k).height)) + a.gap;
+  const center = (k: InfraNode) => ({ x: k.position.x + nodeSize(k).width / 2 - PAD, y: k.position.y + nodeSize(k).height / 2 - top });
+  const key = (k: InfraNode): [number, number, number, number] => {
+    const c = center(k);
+    if (a.mode === 'list') return [0, 0, c.y, c.x];
+    if (a.mode === 'row') return [0, 0, c.x, c.y];
+    return [Math.floor(c.y / pitchY), Math.floor(c.x / pitchX), c.y, c.x];
+  };
+  const keys = new Map(kids.map((k) => [k.id, key(k)]));
+  kids.sort((p, q) => {
+    const kp = keys.get(p.id)!;
+    const kq = keys.get(q.id)!;
+    return kp[0] - kq[0] || kp[1] - kq[1] || kp[2] - kq[2] || kp[3] - kq[3];
+  });
+
+  const colW = new Array<number>(cols).fill(0);
+  const rowH: number[] = [];
+  kids.forEach((k, i) => {
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    colW[c] = Math.max(colW[c], size(k).width);
+    rowH[r] = Math.max(rowH[r] ?? 0, size(k).height);
+  });
+  const colX = colW.map((_, c) => PAD + colW.slice(0, c).reduce((s, w) => s + w + a.gap, 0));
+  const rowY = rowH.map((_, r) => top + rowH.slice(0, r).reduce((s, h) => s + h + a.gap, 0));
+  kids.forEach((k, i) => {
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    // Grid cells center their member; lists and rows line them up on the left / top.
+    const dx = a.mode === 'grid' ? (colW[c] - size(k).width) / 2 : 0;
+    ctx.positions.set(k.id, { x: Math.round(colX[c] + dx), y: Math.round(rowY[r]) });
+  });
+  const contentW = colW.reduce((s, w) => s + w, 0) + a.gap * (cols - 1);
+  const contentH = rowH.reduce((s, h) => s + h, 0) + a.gap * (rowH.length - 1);
+  ctx.sizes.set(parent.id, { width: Math.round(Math.max(200, contentW + PAD * 2)), height: Math.round(top + contentH + PAD) });
+  ctx.resized.add(parent.id);
 }
 
 /** Guests leaving compact view get their normal card size back. */
@@ -245,11 +322,20 @@ function restoreCardSize(k: InfraNode, ctx: Ctx): void {
   ctx.resized.add(k.id);
 }
 
-/** Lay out the children of a container, returning the container's new size. */
-function layoutContainer(parent: InfraNode, ctx: Ctx, byId: Map<string, InfraNode>): void {
+/**
+ * Lay out the children of a container, returning the container's new size.
+ * `deep` also re-arranges the free containers inside an arranged group.
+ */
+function layoutContainer(parent: InfraNode, ctx: Ctx, byId: Map<string, InfraNode>, deep = true): void {
   const kids = ctx.children.get(parent.id) ?? [];
   if (isCompactHost(parent)) {
-    compactLayout(parent, ctx, Math.max(nodeSize(parent).width, COMPACT_MIN_WIDTH), false);
+    const cols = compactColumns(arrangementOf(parent), kids.length);
+    const min = cols > 1 ? cols * COMPACT_COL_MIN + (cols - 1) * COMPACT_COL_GAP + COMPACT_PAD * 2 : COMPACT_MIN_WIDTH;
+    compactLayout(parent, ctx, Math.max(nodeSize(parent).width, min), false);
+    return;
+  }
+  if (isArranged(parent)) {
+    arrangeLayout(parent, ctx, byId, deep);
     return;
   }
   if (!kids.length) {
@@ -318,12 +404,16 @@ function applyCtx(nodes: InfraNode[], ctx: Ctx): InfraNode[] {
   });
 }
 
-/** Re-arrange the inside of one host (after toggling compact view, adding or moving guests…). */
-export function relayoutContainer(nodes: InfraNode[], edges: InfraEdge[], id: string): InfraNode[] {
+/**
+ * Re-arrange the inside of one host or group (after toggling compact view,
+ * adding or moving members…). Shallow (`deep: false`) keeps the hand-made
+ * layout of free containers inside an arranged group.
+ */
+export function relayoutContainer(nodes: InfraNode[], edges: InfraEdge[], id: string, deep = true): InfraNode[] {
   const ctx = buildCtx(nodes, edges, 'network');
   const node = nodes.find((n) => n.id === id);
   if (!node) return nodes;
-  layoutContainer(node, ctx, new Map(nodes.map((n) => [n.id, n])));
+  layoutContainer(node, ctx, new Map(nodes.map((n) => [n.id, n])), deep);
   return sortByHierarchy(applyCtx(nodes, ctx));
 }
 

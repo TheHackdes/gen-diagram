@@ -1,9 +1,12 @@
 import {
   BringToFront,
   ClipboardPaste,
+  Columns3,
   Copy,
   CopyPlus,
+  Grid3x3,
   Group,
+  List,
   Lock,
   LockOpen,
   LayoutGrid,
@@ -11,6 +14,7 @@ import {
   Link2,
   LogOut,
   Maximize,
+  Move,
   Plus,
   Scissors,
   SendToBack,
@@ -24,6 +28,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { getDefinition, getPreset } from '../../data/catalog';
 import { fitDiagram } from '../../features/canvas/flowApi';
+import { ARRANGE_MODES, arrangementOf, canArrange, canCompact, type ArrangeMode } from '../../features/nodes/arrange';
 import { parallelEdges } from '../../features/connections/parallel';
 import { useDiagram } from '../../store/diagramStore';
 import { useUi } from '../../store/uiStore';
@@ -79,9 +84,18 @@ export function ContextMenu() {
         'separator',
         { id: 'group', label: 'Group selection', icon: <Group size={14} />, shortcut: `${modKey}G`, onSelect: () => (st.select(ids), st.groupSelection()) },
       );
-      if (def.kind === 'container' && st.nodes.some((n) => n.parentId === node.id)) {
+      if (canCompact(node) && st.nodes.some((n) => n.parentId === node.id)) {
         const compact = node.data.props.compact === true;
-        items.push({ id: 'compact', label: compact ? 'Show guests as cards' : 'Compact view', icon: compact ? <LayoutGrid size={14} /> : <Rows3 size={14} />, onSelect: () => st.setCompact(node.id, !compact) });
+        const cards = def.kind === 'container' ? 'Show guests as cards' : 'Show members as cards';
+        items.push({ id: 'compact', label: compact ? cards : 'Compact view', icon: compact ? <LayoutGrid size={14} /> : <Rows3 size={14} />, onSelect: () => st.setCompact(node.id, !compact) });
+      }
+      if (canArrange(node)) {
+        const current = arrangementOf(node).mode;
+        const icons: Record<ArrangeMode, React.ReactNode> = { free: <Move size={14} />, list: <List size={14} />, row: <Columns3 size={14} />, grid: <Grid3x3 size={14} /> };
+        items.push('separator', { heading: 'Arrange members' });
+        for (const m of ARRANGE_MODES)
+          items.push({ id: `arrange-${m.value}`, label: m.label, description: m.title, icon: icons[m.value], checked: current === m.value, onSelect: () => st.updateNodeProps(node.id, { arrange: m.value }) });
+        items.push('separator');
       }
       if (def.accepts && st.nodes.some((n) => n.parentId === node.id)) {
         items.push({ id: 'ungroup', label: def.type === 'group' ? 'Ungroup' : 'Release children', icon: <Ungroup size={14} />, shortcut: `${modKey}⇧G`, onSelect: () => st.ungroup(node.id) });

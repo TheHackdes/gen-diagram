@@ -16,9 +16,10 @@ import { parallelEdges } from '../features/connections/parallel';
 import { suggestConnection } from '../features/connections/suggest';
 import { autoLayout, relayoutContainer } from '../features/layout/autoLayout';
 import { createNode, createNodeFromPreset, withLayer } from '../features/nodes/factory';
-import { childTop, COMPACT_ROW, COMPACT_WIDTH, compactRoot, defaultInterface, fitDeviceHeight, headerHeight, inCompactHost } from '../features/nodes/ips';
+import { childTop, COMPACT_ROW, COMPACT_WIDTH, defaultInterface, fitDeviceHeight, headerHeight, inCompactHost, managedAncestors } from '../features/nodes/ips';
 import {
   absolutePosition,
+  depthOf,
   descendantIds,
   findContainerAt,
   fitContainersToChildren,
@@ -116,7 +117,7 @@ export interface DiagramState {
   toggleLock: (ids: string[]) => void;
   /** Show the guests of a host as compact lines (and nested hosts as compact blocks). */
   setCompact: (id: string, on: boolean) => void;
-  /** Re-arrange the compact hosts containing these nodes. */
+  /** Re-arrange the compact hosts and arranged groups containing these nodes. */
   refreshCompact: (ids: string[]) => void;
   handleDragStop: (ids: string[]) => void;
   detachFromParent: (id: string) => void;
@@ -435,7 +436,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
         }),
         dirty: true,
       });
-      if (compactRoot(id, indexById(get().nodes))) {
+      if (managedAncestors(id, indexById(get().nodes)).length) {
         get().refreshCompact([id]);
         return;
       }
@@ -580,19 +581,20 @@ export const useDiagram = create<DiagramState>((set, get) => {
       );
       // Grow what must grow, then let the surrounding zones hug the (smaller) host.
       commitNodes(shrinkAncestors(fitContainersToChildren(relayoutContainer(nodes, get().edges, id)), id));
+      // An arranged group around it makes room for its new size.
+      if (host.parentId) get().refreshCompact([host.parentId]);
     },
 
     refreshCompact: (ids) => {
       let nodes = get().nodes;
-      const roots = new Set<string>();
       const byId = indexById(nodes);
-      for (const id of ids) {
-        const root = compactRoot(id, byId);
-        if (root) roots.add(root.id);
-      }
-      if (!roots.size) return;
-      for (const r of roots) nodes = relayoutContainer(nodes, get().edges, r);
-      set({ nodes: sortByHierarchy(fitContainersToChildren(nodes)) });
+      const targets = new Map<string, number>();
+      for (const id of ids) for (const m of managedAncestors(id, byId)) targets.set(m.id, depthOf(m, byId));
+      if (!targets.size) return;
+      // Innermost first: an arranged group places its members once they have their final size.
+      const order = [...targets].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+      for (const r of order) nodes = fitContainersToChildren(relayoutContainer(nodes, get().edges, r, false));
+      set({ nodes: sortByHierarchy(nodes) });
     },
 
     handleDragStop: (ids) => {

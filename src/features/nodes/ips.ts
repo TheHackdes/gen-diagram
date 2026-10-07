@@ -2,6 +2,7 @@ import { getDefinition } from '../../data/catalog';
 import type { InfraNode, IpEntry } from '../../types';
 import { str } from '../../utils/misc';
 import { servicesOf } from '../../data/services';
+import { isArranged } from './arrange';
 import { detailLines } from './details';
 
 /** Additional addresses of a node (props.ips), tolerant to malformed data. */
@@ -120,16 +121,27 @@ export function inCompactHost(node: InfraNode, byId: Map<string, InfraNode>): bo
   return false;
 }
 
-/** Outermost compact host containing (or being) this node. */
-export function compactRoot(nodeId: string, byId: Map<string, InfraNode>): InfraNode | undefined {
+/** A container whose members are placed by the app (compact lines or an arranged group). */
+export const isManaged = (n: InfraNode | undefined): boolean => isCompactHost(n) || isArranged(n);
+
+/**
+ * Containers to re-arrange, innermost first, after something changed in or on
+ * `nodeId`: the outermost compact host above it (it lays out all its levels)
+ * and the arranged groups above that.
+ */
+export function managedAncestors(nodeId: string, byId: Map<string, InfraNode>): InfraNode[] {
+  const chain: InfraNode[] = [];
   let cur = byId.get(nodeId);
-  let found: InfraNode | undefined;
   let guard = 0;
   while (cur && guard++ < 50) {
-    if (isCompactHost(cur)) found = cur;
+    chain.push(cur);
     cur = cur.parentId ? byId.get(cur.parentId) : undefined;
   }
-  return found;
+  let root = -1;
+  chain.forEach((n, i) => {
+    if (isCompactHost(n)) root = i;
+  });
+  return chain.filter((n, i) => i === root || (i > root && isArranged(n)));
 }
 
 /** Top offset of the children of a container. */

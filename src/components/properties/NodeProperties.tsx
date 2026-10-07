@@ -10,12 +10,13 @@ import { alpha, str } from '../../utils/misc';
 import { Icon } from '../icons/Icon';
 import { Button, IconButton } from '../ui/Button';
 import { cn } from '../ui/cn';
-import { FieldRow, Input, Switch } from '../ui/Field';
+import { FieldRow, Input, Segmented, Switch } from '../ui/Field';
 import { analyzeBond } from '../../features/connections/bonds';
 import { hasRules } from '../../features/firewall/rules';
 import { DEFAULT_DISPLAY, DETAIL_OPTIONS, displayedKeys } from '../../features/nodes/details';
 import { COMPACT_FIELDS, compactFieldsOf, DEFAULT_COMPACT_FIELDS, type CompactField } from '../../features/nodes/compact';
 import { inCompactHost } from '../../features/nodes/ips';
+import { ARRANGE_MODES, arrangementOf, canArrange, canCompact, DEFAULT_GAP, type ArrangeMode } from '../../features/nodes/arrange';
 import { FieldEditor } from './FieldEditor';
 import { FirewallRulesSection } from './rules/FirewallRulesSection';
 import { ServicesSection } from './ServicesSection';
@@ -185,6 +186,70 @@ function CapabilitySection({ node, capability }: { node: InfraNode; capability: 
   );
 }
 
+/** Number field where an empty value means "automatic". */
+function CountInput({ id, value, placeholder, onChange }: { id: string; value: number; placeholder: string; onChange: (v: number | undefined) => void }) {
+  return (
+    <Input
+      id={id}
+      type="number"
+      min={0}
+      inputMode="numeric"
+      value={value || ''}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value === '' ? undefined : Math.max(0, Math.floor(Number(e.target.value))) || undefined)}
+    />
+  );
+}
+
+/** How the members of a group / zone are placed: by hand, list, row or grid. */
+function ArrangeControls({ node, compact }: { node: InfraNode; compact: boolean }) {
+  const update = useDiagram((s) => s.updateNodeProps);
+  const a = arrangementOf(node);
+  const set = (patch: Record<string, unknown>) => update(node.id, patch);
+  return (
+    <div className="mb-3.5 space-y-3">
+      <FieldRow label="Arrange members">
+        <Segmented<ArrangeMode>
+          value={a.mode}
+          onChange={(mode) => set({ arrange: mode })}
+          options={ARRANGE_MODES.map((m) => ({ value: m.value, label: m.label, title: m.title }))}
+        />
+      </FieldRow>
+      {a.mode === 'grid' && (
+        <div className="grid grid-cols-2 gap-2">
+          <FieldRow label="Columns" htmlFor={`cols-${node.id}`}>
+            <CountInput id={`cols-${node.id}`} value={a.columns} placeholder="Auto" onChange={(v) => set({ arrangeColumns: v })} />
+          </FieldRow>
+          <FieldRow label="Rows" htmlFor={`rows-${node.id}`}>
+            <CountInput id={`rows-${node.id}`} value={a.rows} placeholder="Auto" onChange={(v) => set({ arrangeRows: v })} />
+          </FieldRow>
+        </div>
+      )}
+      {a.mode !== 'free' && !compact && (
+        <FieldRow label="Spacing" htmlFor={`gap-${node.id}`}>
+          <Input
+            id={`gap-${node.id}`}
+            type="number"
+            min={0}
+            max={200}
+            value={a.gap}
+            onChange={(e) => set({ arrangeGap: e.target.value === '' ? DEFAULT_GAP : Math.max(0, Number(e.target.value)) })}
+          />
+        </FieldRow>
+      )}
+      <p className="text-[11.5px] leading-snug text-subtle">
+        {a.mode === 'free'
+          ? 'Members stay where you drop them.'
+          : compact
+            ? a.mode === 'grid'
+              ? 'Compact lines are split into columns (filled top to bottom).'
+              : 'Compact lines are stacked in one column.'
+            : 'The group sizes itself to its members. Drag a member onto another place to reorder it.'}
+      </p>
+    </div>
+  );
+}
+
 function CompactSection({ node }: { node: InfraNode }) {
   const setCompact = useDiagram((s) => s.setCompact);
   const update = useDiagram((s) => s.updateNodeProps);
@@ -197,12 +262,13 @@ function CompactSection({ node }: { node: InfraNode }) {
   const fields = compactFieldsOf(node);
   const toggle = (key: CompactField) => update(node.id, { compactFields: fields.includes(key) ? fields.filter((k) => k !== key) : [...fields, key] });
   const isDefault = fields.length === DEFAULT_COMPACT_FIELDS.length && DEFAULT_COMPACT_FIELDS.every((k) => fields.includes(k));
+  const def = getDefinition(node.data.type);
+  const members = def.kind === 'container' ? (def.role === 'docker-host' ? 'container' : 'VM, LXC or container') : 'member';
   return (
     <Section title="Display">
+      {canArrange(node) && <ArrangeControls node={node} compact={on} />}
       <Switch id={`compact-${node.id}`} label="Compact view" checked={on} onChange={(v) => setCompact(node.id, v)} />
-      <p className="mt-1.5 text-[11.5px] leading-snug text-subtle">
-        One line per {getDefinition(node.data.type).role === 'docker-host' ? 'container' : 'VM, LXC or container'}. Drag a line to reorder it.
-      </p>
+      <p className="mt-1.5 text-[11.5px] leading-snug text-subtle">One line per {members}. Drag a line to reorder it.</p>
       {on && (
         <div className="mt-3">
           <div className="mb-1.5 flex items-center justify-between">
@@ -324,7 +390,7 @@ export function NodeProperties({ node }: { node: InfraNode }) {
       </div>
 
       <QuickAdd node={node} />
-      {def.kind === 'container' && <CompactSection node={node} />}
+      {canCompact(node) && <CompactSection node={node} />}
 
       <Section title="Properties">
         <div className="space-y-3">

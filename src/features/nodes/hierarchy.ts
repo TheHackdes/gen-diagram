@@ -1,7 +1,7 @@
 import type { XYPosition } from '@xyflow/react';
 import { canContain, getDefinition } from '../../data/catalog';
 import type { InfraNode } from '../../types';
-import { inCompactHost, isCompactHost } from './ips';
+import { inCompactHost, isManaged } from './ips';
 
 export function nodeSize(n: InfraNode): { width: number; height: number } {
   const def = getDefinition(n.data.type);
@@ -117,8 +117,8 @@ export function fitContainersToChildren(nodes: InfraNode[], padding = 20): Infra
     .filter((n) => result.some((c) => c.parentId === n.id))
     .sort((a, b) => depthOf(b, byId) - depthOf(a, byId));
   for (const parent of order) {
-    // Compact hosts size themselves (see relayoutContainer).
-    if (isCompactHost(parent) || inCompactHost(parent, byId)) continue;
+    // Compact hosts and arranged groups size themselves (see relayoutContainer).
+    if (isManaged(parent) || inCompactHost(parent, byId)) continue;
     const idx = byIdx.get(parent.id)!;
     const current = result[idx];
     const kids = result.filter((c) => c.parentId === parent.id);
@@ -150,7 +150,7 @@ export function shrinkAncestors(nodes: InfraNode[], id: string, padding = 24): I
   let guard = 0;
   while (parentId && guard++ < 50) {
     const parent = byId.get(parentId);
-    if (!parent || isCompactHost(parent) || inCompactHost(parent, byId)) break;
+    if (!parent || isManaged(parent) || inCompactHost(parent, byId)) break;
     const kids = result.filter((n) => n.parentId === parentId);
     if (!kids.length) break;
     let maxX = 0;
