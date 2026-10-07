@@ -4,8 +4,9 @@ import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force';
 import { CATEGORIES } from '../../data/categories';
 import { getDefinition, isContainerDef } from '../../data/catalog';
 import type { InfraEdge, InfraNode, LayoutAlgorithm, NodeRole } from '../../types';
-import { nodeSize, sortByHierarchy } from '../nodes/hierarchy';
+import { nodeIndex, nodeSize, sortByHierarchy } from '../nodes/hierarchy';
 import { arrangementOf, columnsFor, compactColumns, isArranged, linesPerColumn } from '../nodes/arrange';
+import { cardFieldsAbove } from '../nodes/groupDisplay';
 import { childTop, COMPACT_ROW, isCompactHost, requiredHeight } from '../nodes/ips';
 import { str } from '../../utils/misc';
 
@@ -318,7 +319,7 @@ function arrangeLayout(parent: InfraNode, ctx: Ctx, byId: Map<string, InfraNode>
 function restoreCardSize(k: InfraNode, ctx: Ctx): void {
   const def = getDefinition(k.data.type);
   if (def.kind !== 'device' || nodeSize(k).height > COMPACT_ROW) return;
-  ctx.sizes.set(k.id, { width: def.size.width, height: requiredHeight(k) });
+  ctx.sizes.set(k.id, { width: def.size.width, height: requiredHeight(k, cardFieldsAbove(k.parentId, nodeIndex(ctx.nodes).byId)) });
   ctx.resized.add(k.id);
 }
 

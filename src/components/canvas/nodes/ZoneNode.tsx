@@ -3,6 +3,7 @@ import { LayoutGrid, Lock, Rows3 } from 'lucide-react';
 import { memo } from 'react';
 import { colorOf, getDefinition } from '../../../data/catalog';
 import { isArranged } from '../../../features/nodes/arrange';
+import { headerFieldsOf, type HeaderField } from '../../../features/nodes/groupDisplay';
 import { nodeIndex } from '../../../features/nodes/hierarchy';
 import { COMPACT_HEADER } from '../../../features/nodes/ips';
 import { useDiagram } from '../../../store/diagramStore';
@@ -28,15 +29,19 @@ function ZoneNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) {
   const isArea = data.type === 'area' || data.type === 'site';
   const compact = data.props.compact === true;
   const accepts = def.accepts !== undefined;
-  const badge = vlan ? (
+  const fields = headerFieldsOf({ data } as InfraNode);
+  const head = (k: HeaderField) => fields.includes(k);
+  const description = head('description') ? str(data.props.description) : '';
+  const countLabel = `${childCount} ${childCount === 1 ? 'item' : 'items'}`;
+  const badge = vlan && head('vlan') ? (
     <span className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-bold text-white" style={{ background: color }}>
       VLAN {vlan.id}
     </span>
-  ) : (
+  ) : head('icon') ? (
     <span style={{ color }} className="shrink-0">
       <Icon name={def.icon} size={14} brandColor={def.icon.startsWith('brand:')} />
     </span>
-  );
+  ) : null;
 
   // Inside a compact host: a compact block (one-line header, members as lines below).
   if (inCompact) {
@@ -48,14 +53,15 @@ function ZoneNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) {
         <NodeHandles nodeId={id} />
         <div className="flex items-center gap-2 border-b px-2" style={{ height: COMPACT_HEADER, borderColor: alpha(color, 0.2) }}>
           {badge}
-          <span className="max-w-[45%] min-w-0 truncate" style={{ color }}>
-            <EditableName id={id} value={data.name} className="text-[12px] font-semibold" />
-          </span>
-          {show.has('ip') && subnet && <span className="min-w-0 truncate font-mono text-[10.5px] text-muted">{subnet}</span>}
+          {head('name') && (
+            <span className="max-w-[45%] min-w-0 truncate" style={{ color }}>
+              <EditableName id={id} value={data.name} className="text-[12px] font-semibold" />
+            </span>
+          )}
+          {head('subnet') && show.has('ip') && subnet && <span className="min-w-0 truncate font-mono text-[10.5px] text-muted">{subnet}</span>}
+          {description && <span className="min-w-0 truncate text-[10.5px] text-subtle">{description}</span>}
           <span className="flex-1" />
-          <span className="shrink-0 text-[10px] font-medium text-muted">
-            {childCount} {childCount === 1 ? 'item' : 'items'}
-          </span>
+          <span className="shrink-0 text-[10px] font-medium text-muted">{countLabel}</span>
           {data.locked && <Lock size={10} className="shrink-0 text-subtle" />}
         </div>
       </div>
@@ -75,16 +81,24 @@ function ZoneNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) {
       <NodeHandles nodeId={id} />
       <div className="absolute top-3 right-3 left-3.5 flex min-w-0 items-center gap-2">
         {badge}
-        <span className="min-w-0 truncate" style={{ color }}>
-          <EditableName
-            id={id}
-            value={data.name}
-            className={cn('font-semibold', isGroup ? 'text-[12px]' : 'text-[13px]')}
-          />
-        </span>
-        {subnet && <span className="shrink-0 font-mono text-[11px] text-muted">{subnet}</span>}
+        {head('name') && (
+          <span className="min-w-0 truncate" style={{ color }}>
+            <EditableName
+              id={id}
+              value={data.name}
+              className={cn('font-semibold', isGroup ? 'text-[12px]' : 'text-[13px]')}
+            />
+          </span>
+        )}
+        {head('subnet') && subnet && <span className="shrink-0 font-mono text-[11px] text-muted">{subnet}</span>}
+        {description && <span className="min-w-0 truncate text-[11px] text-subtle">{description}</span>}
         <span className="flex-1" />
-        {gateway && <span className="hidden shrink-0 font-mono text-[10.5px] text-subtle sm:inline">gw {gateway}</span>}
+        {head('gateway') && gateway && <span className="hidden shrink-0 font-mono text-[10.5px] text-subtle sm:inline">gw {gateway}</span>}
+        {head('count') && (
+          <span className="shrink-0 rounded-full px-1.5 py-px text-[10px] font-semibold" style={{ background: alpha(color, 0.12), color }}>
+            {countLabel}
+          </span>
+        )}
         {accepts && childCount > 0 && (
           <button
             type="button"

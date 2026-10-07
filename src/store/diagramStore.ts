@@ -44,6 +44,7 @@ import {
 import { DEFAULT_SETTINGS, fromProjectFile, toProjectFile, type DiagramContent } from '../features/projects/serialization';
 import { saveProjectFile } from '../features/projects/storage';
 import { flowApi } from '../features/canvas/flowApi';
+import { cardFieldsAbove } from '../features/nodes/groupDisplay';
 import type {
   Bond,
   ConnectionType,
@@ -247,6 +248,31 @@ export const useDiagram = create<DiagramState>((set, get) => {
     return { ...node, data: { ...node.data, props } };
   };
 
+  /** Card height for what the group around it shows. */
+  const fitCard = (node: InfraNode, nodes: InfraNode[]): InfraNode => fitDeviceHeight(node, cardFieldsAbove(node.parentId, indexById(nodes)));
+
+  /**
+   * Refit the cards of these nodes and everything inside them (their group
+   * changed, or what it shows). Returns the nodes and the refitted ids.
+   */
+  const refitCards = (nodes: InfraNode[], ids: string[]): { nodes: InfraNode[]; changed: string[] } => {
+    const scope = new Set<string>();
+    for (const id of ids) {
+      scope.add(id);
+      for (const d of descendantIds(id, nodes)) scope.add(d);
+    }
+    const byId = indexById(nodes);
+    const changed: string[] = [];
+    const out = nodes.map((n) => {
+      // Compact lines have their own size.
+      if (!scope.has(n.id) || getDefinition(n.data.type).kind !== 'device' || inCompactHost(n, byId)) return n;
+      const next = fitDeviceHeight(n, cardFieldsAbove(n.parentId, byId));
+      if (next !== n) changed.push(n.id);
+      return next;
+    });
+    return { nodes: changed.length ? out : nodes, changed };
+  };
+
   return {
     metadata: newMetadata('Untitled project'),
     nodes: [],
@@ -358,7 +384,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
         parentId: parent?.id,
         existingNames: nodes.map((n) => n.data.name),
       });
-      node = inheritFromParent(node, nodes);
+      node = fitCard(inheritFromParent(node, nodes), nodes);
       node.selected = true;
       const next = fitContainersToChildren([...nodes.map((n) => ({ ...n, selected: false })), node]);
       commitNodes(next, { edges: get().edges.map((e) => ({ ...e, selected: false })) });
@@ -409,7 +435,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
         existingNames: nodes.map((n) => n.data.name),
         props: preset?.props,
       });
-      node = inheritFromParent(node, nodes);
+      node = fitCard(inheritFromParent(node, nodes), nodes);
       node.selected = true;
       commitNodes(fitContainersToChildren([...nodes.map((n) => ({ ...n, selected: false })), node]));
       get().refreshCompact([node.id]);
@@ -432,10 +458,20 @@ export const useDiagram = create<DiagramState>((set, get) => {
         nodes: get().nodes.map((n) => {
           if (n.id !== id) return n;
           const next = { ...n, data: { ...n.data, props: { ...n.data.props, ...patch } } };
-          return ['ips', 'fw', 'vpn', 'wifi', 'services', 'display', 'vpnIp', 'vpnProtocol', 'vpnMode', 'vpnEndpoint', 'vpnNetwork', 'ssid', 'band', 'wifiStandard', 'wifiSecurity'].some((k) => k in patch) ? fitDeviceHeight(next) : next;
+          return ['ips', 'fw', 'vpn', 'wifi', 'services', 'display', 'vpnIp', 'vpnProtocol', 'vpnMode', 'vpnEndpoint', 'vpnNetwork', 'ssid', 'band', 'wifiStandard', 'wifiSecurity'].some((k) => k in patch)
+            ? fitCard(next, get().nodes)
+            : next;
         }),
         dirty: true,
       });
+      // A group changed what its cards show: they take their new height.
+      if ('cardFields' in patch) {
+        const { nodes, changed } = refitCards(get().nodes, [id]);
+        if (changed.length) {
+          set({ nodes: fitContainersToChildren(nodes) });
+          get().refreshCompact(changed);
+        }
+      }
       if (managedAncestors(id, indexById(get().nodes)).length) {
         get().refreshCompact([id]);
         return;
@@ -557,7 +593,9 @@ export const useDiagram = create<DiagramState>((set, get) => {
       const node = get().nodes.find((n) => n.id === id);
       if (!node || !getDefinition(node.data.type).accepts) return;
       get().checkpoint();
-      commitNodes(ungroupNode(get().nodes, id));
+      const kids = get().nodes.filter((n) => n.parentId === id).map((n) => n.id);
+      // Released members follow what their new group shows.
+      commitNodes(refitCards(ungroupNode(get().nodes, id), kids).nodes);
     },
 
     toggleLock: (ids) => {
@@ -621,8 +659,10 @@ export const useDiagram = create<DiagramState>((set, get) => {
           // A guest dragged out of a compact host gets its card back.
           const def = getDefinition(inherited.data.type);
           if (def.kind === 'device' && !inCompactHost(inherited, indexById(nodes)) && nodeSize(inherited).height <= COMPACT_ROW)
-            inherited = fitDeviceHeight({ ...inherited, width: def.size.width, height: def.size.height, measured: undefined });
+            inherited = { ...inherited, width: def.size.width, height: def.size.height, measured: undefined };
           nodes = nodes.map((n) => (n.id === moved.id ? inherited : n));
+          // Cards follow what their new group shows.
+          nodes = refitCards(nodes, [moved.id]).nodes;
           if (target) touched.add(target.id);
           changed = true;
         }
@@ -650,7 +690,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
           return { ...n, position: { x: pAbs.x + ps.width + 40 - grand.x, y: pAbs.y - grand.y } };
         });
       }
-      commitNodes(nodes);
+      commitNodes(refitCards(nodes, [id]).nodes);
     },
 
     align: (mode) => {

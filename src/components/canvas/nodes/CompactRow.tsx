@@ -1,8 +1,10 @@
+import { useMemo } from 'react';
 import { Lock } from 'lucide-react';
 import { colorOf, getDefinition } from '../../../data/catalog';
 import { shownAddresses } from '../../../features/nodes/ips';
 import { useDiagram } from '../../../store/diagramStore';
 import { compactFieldsOf, compactHostAbove, type CompactField } from '../../../features/nodes/compact';
+import { cardFieldsAbove, type CardField } from '../../../features/nodes/groupDisplay';
 import { nodeIndex } from '../../../features/nodes/hierarchy';
 import type { InfraNode } from '../../../types';
 import { alpha, str } from '../../../utils/misc';
@@ -32,6 +34,18 @@ const SHORT_TYPE: Record<string, string> = { 'docker-container': 'CT', 'docker-h
 export function useCompactFields(parentId: string | undefined): Set<CompactField> {
   const key = useDiagram((s) => compactFieldsOf(compactHostAbove(parentId, s.nodes)).join(','));
   return new Set(key ? (key.split(',') as CompactField[]) : []);
+}
+
+/**
+ * What the group around a card lets it show (stable string for the store
+ * selector); undefined: everything.
+ */
+export function useCardFields(parentId: string | undefined): CardField[] | undefined {
+  const key = useDiagram((s) => {
+    const fields = cardFieldsAbove(parentId, nodeIndex(s.nodes).byId);
+    return fields ? `=${fields.join(',')}` : '';
+  });
+  return useMemo(() => (key ? (key.slice(1).split(',').filter(Boolean) as CardField[]) : undefined), [key]);
 }
 
 function resources(props: Record<string, unknown>): string {

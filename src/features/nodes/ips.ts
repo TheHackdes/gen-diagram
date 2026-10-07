@@ -3,6 +3,7 @@ import type { InfraNode, IpEntry } from '../../types';
 import { str } from '../../utils/misc';
 import { servicesOf } from '../../data/services';
 import { isArranged } from './arrange';
+import type { CardField } from './groupDisplay';
 import { detailLines } from './details';
 
 /** Additional addresses of a node (props.ips), tolerant to malformed data. */
@@ -79,13 +80,18 @@ export const MAX_IP_LINES = 4;
 const LINE = 14;
 const BADGE_ROW = 20;
 
-/** Device cards grow to show their additional addresses. */
-export function requiredHeight(node: InfraNode): number {
+/**
+ * Device cards grow to show their additional addresses. `show` is what the
+ * group around the card lets it display (undefined: everything).
+ */
+export function requiredHeight(node: InfraNode, show?: readonly CardField[]): number {
   const def = getDefinition(node.data.type);
   if (def.renderer !== 'device' || def.role === 'docker-container') return def.size.height;
+  const has = (k: CardField) => !show || show.includes(k);
   // The base card has one line under the name (role, or the first address line).
-  const lines = Math.max(0, addressLines(node.data.props) - 1);
-  return def.size.height + (lines + detailLines(node.data.props).length) * LINE + (hasBadges(node.data.props) ? BADGE_ROW : 0);
+  const lines = has('ip') ? Math.max(0, addressLines(node.data.props) - 1) : 0;
+  const details = has('details') ? detailLines(node.data.props).length : 0;
+  return def.size.height + (lines + details) * LINE + (has('services') && hasBadges(node.data.props) ? BADGE_ROW : 0);
 }
 
 /**
@@ -150,11 +156,11 @@ export function childTop(node: InfraNode, compactRow = false): number {
   return headerHeight(node) + (isCompactHost(node) ? 8 : 12);
 }
 
-/** Adjust a device's height after its address list changed. */
-export function fitDeviceHeight(node: InfraNode): InfraNode {
+/** Adjust a device's height after its address list (or what its group shows) changed. */
+export function fitDeviceHeight(node: InfraNode, show?: readonly CardField[]): InfraNode {
   const def = getDefinition(node.data.type);
   if (def.renderer !== 'device' || def.role === 'docker-container') return node;
-  const height = requiredHeight(node);
+  const height = requiredHeight(node, show);
   return node.height === height ? node : { ...node, height, measured: undefined };
 }
 

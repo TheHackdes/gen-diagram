@@ -16,6 +16,17 @@ import { hasRules } from '../../features/firewall/rules';
 import { DEFAULT_DISPLAY, DETAIL_OPTIONS, displayedKeys } from '../../features/nodes/details';
 import { COMPACT_FIELDS, compactFieldsOf, DEFAULT_COMPACT_FIELDS, type CompactField } from '../../features/nodes/compact';
 import { inCompactHost } from '../../features/nodes/ips';
+import {
+  ALL_CARD_FIELDS,
+  CARD_FIELDS,
+  cardFieldsAbove,
+  cardFieldsOf,
+  DEFAULT_HEADER_FIELDS,
+  headerFieldsOf,
+  headerOptionsFor,
+  type CardField,
+  type HeaderField,
+} from '../../features/nodes/groupDisplay';
 import { ARRANGE_MODES, arrangementOf, canArrange, canCompact, DEFAULT_GAP, type ArrangeMode } from '../../features/nodes/arrange';
 import { FieldEditor } from './FieldEditor';
 import { FirewallRulesSection } from './rules/FirewallRulesSection';
@@ -250,6 +261,102 @@ function ArrangeControls({ node, compact }: { node: InfraNode; compact: boolean 
   );
 }
 
+/** Eye / eye-off chips choosing which items are shown. */
+function FieldToggles<K extends string>({
+  title,
+  options,
+  selected,
+  onChange,
+  onReset,
+  alwaysShown,
+  hint,
+}: {
+  title: string;
+  options: readonly { key: K; label: string }[];
+  selected: readonly K[];
+  onChange: (next: K[]) => void;
+  /** Shown when the choice differs from the default. */
+  onReset?: () => void;
+  alwaysShown?: string;
+  hint?: string;
+}) {
+  const toggle = (key: K) => onChange(selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key]);
+  return (
+    <div className="mt-3">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-xs font-medium text-muted">{title}</span>
+        {onReset && (
+          <button type="button" onClick={onReset} className="text-[11px] text-subtle hover:text-fg">
+            Reset
+          </button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {alwaysShown && (
+          <span className="flex h-6 items-center gap-1 rounded-md border border-line bg-surface-2 px-1.5 text-[11.5px] text-subtle" title="Always shown">
+            <Eye size={11} /> {alwaysShown}
+          </span>
+        )}
+        {options.map((f) => {
+          const active = selected.includes(f.key);
+          return (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={active}
+              onClick={() => toggle(f.key)}
+              className={cn(
+                'flex h-6 items-center gap-1 rounded-md border px-1.5 text-[11.5px] transition-colors',
+                active ? 'border-primary bg-primary-soft text-primary' : 'border-line text-muted hover:text-fg',
+              )}
+            >
+              {active ? <Eye size={11} /> : <EyeOff size={11} />}
+              {f.label}
+            </button>
+          );
+        })}
+      </div>
+      {hint && <p className="mt-1.5 text-[11.5px] leading-snug text-subtle">{hint}</p>}
+    </div>
+  );
+}
+
+const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((k) => b.includes(k));
+
+/** Group / zone: what its header shows and what the cards inside show. */
+function GroupDisplayControls({ node, compact }: { node: InfraNode; compact: boolean }) {
+  const update = useDiagram((s) => s.updateNodeProps);
+  // Inherited choice (from a group around this one), as a stable string.
+  const inheritedKey = useDiagram((s) => (cardFieldsAbove(node.parentId, new Map(s.nodes.map((n) => [n.id, n]))) ?? ALL_CARD_FIELDS).join(','));
+  const header = headerFieldsOf(node);
+  const own = cardFieldsOf(node);
+  const cards = own ?? (inheritedKey ? (inheritedKey.split(',') as CardField[]) : []);
+  return (
+    <div className="mb-3.5">
+      <FieldToggles<HeaderField>
+        title="Header"
+        options={headerOptionsFor(getDefinition(node.data.type))}
+        selected={header}
+        onChange={(next) => update(node.id, { headerFields: next })}
+        onReset={sameSet(header, DEFAULT_HEADER_FIELDS) ? undefined : () => update(node.id, { headerFields: undefined })}
+      />
+      <FieldToggles<CardField>
+        title={own ? 'Member cards' : 'Member cards (inherited)'}
+        options={CARD_FIELDS}
+        selected={cards}
+        alwaysShown="Name"
+        onChange={(next) => update(node.id, { cardFields: next })}
+        onReset={own ? () => update(node.id, { cardFields: undefined }) : undefined}
+        hint={
+          compact
+            ? 'Compact view is on: lines use the fields chosen below.'
+            : 'Applies to the equipment inside, including guests of hosts. A sub-group can choose its own.'
+        }
+      />
+    </div>
+  );
+}
+
 function CompactSection({ node }: { node: InfraNode }) {
   const setCompact = useDiagram((s) => s.setCompact);
   const update = useDiagram((s) => s.updateNodeProps);
@@ -260,49 +367,23 @@ function CompactSection({ node }: { node: InfraNode }) {
   if (nested) return null;
   const on = node.data.props.compact === true;
   const fields = compactFieldsOf(node);
-  const toggle = (key: CompactField) => update(node.id, { compactFields: fields.includes(key) ? fields.filter((k) => k !== key) : [...fields, key] });
-  const isDefault = fields.length === DEFAULT_COMPACT_FIELDS.length && DEFAULT_COMPACT_FIELDS.every((k) => fields.includes(k));
   const def = getDefinition(node.data.type);
   const members = def.kind === 'container' ? (def.role === 'docker-host' ? 'container' : 'VM, LXC or container') : 'member';
   return (
     <Section title="Display">
       {canArrange(node) && <ArrangeControls node={node} compact={on} />}
+      {canArrange(node) && <GroupDisplayControls node={node} compact={on} />}
       <Switch id={`compact-${node.id}`} label="Compact view" checked={on} onChange={(v) => setCompact(node.id, v)} />
       <p className="mt-1.5 text-[11.5px] leading-snug text-subtle">One line per {members}. Drag a line to reorder it.</p>
       {on && (
-        <div className="mt-3">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-xs font-medium text-muted">Show on each line</span>
-            {!isDefault && (
-              <button type="button" onClick={() => update(node.id, { compactFields: DEFAULT_COMPACT_FIELDS })} className="text-[11px] text-subtle hover:text-fg">
-                Reset
-              </button>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-1">
-            <span className="flex h-6 items-center gap-1 rounded-md border border-line bg-surface-2 px-1.5 text-[11.5px] text-subtle" title="Always shown">
-              <Eye size={11} /> Name
-            </span>
-            {COMPACT_FIELDS.map((f) => {
-              const active = fields.includes(f.key);
-              return (
-                <button
-                  key={f.key}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => toggle(f.key)}
-                  className={cn(
-                    'flex h-6 items-center gap-1 rounded-md border px-1.5 text-[11.5px] transition-colors',
-                    active ? 'border-primary bg-primary-soft text-primary' : 'border-line text-muted hover:text-fg',
-                  )}
-                >
-                  {active ? <Eye size={11} /> : <EyeOff size={11} />}
-                  {f.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <FieldToggles<CompactField>
+          title="Show on each line"
+          options={COMPACT_FIELDS}
+          selected={fields}
+          alwaysShown="Name"
+          onChange={(next) => update(node.id, { compactFields: next })}
+          onReset={sameSet(fields, DEFAULT_COMPACT_FIELDS) ? undefined : () => update(node.id, { compactFields: DEFAULT_COMPACT_FIELDS })}
+        />
       )}
     </Section>
   );

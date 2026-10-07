@@ -8,12 +8,16 @@ import { alpha, str } from '../../../utils/misc';
 import { cn } from '../../ui/cn';
 import { useStore } from '@xyflow/react';
 import { lowDetailCards } from '../../../features/canvas/lod';
-import { CompactRow, useInCompactHost } from './CompactRow';
+import { CompactRow, useCardFields, useInCompactHost } from './CompactRow';
+import type { CardField } from '../../../features/nodes/groupDisplay';
 import { hasBadges, hiddenAddressCount, requiredHeight, shownAddresses } from '../../../features/nodes/ips';
 import { AddressLines, CapabilityBadges, DetailLines, EditableName, IconTile, NodeHandles, OsChip, Resizer, useVlan, VlanChips } from './shared';
 
 function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) {
   const compact = useInCompactHost(parentId);
+  const fields = useCardFields(parentId);
+  // What the group around the card lets it show.
+  const has = (k: CardField) => !fields || fields.includes(k);
   const simple = useStore((s) => lowDetailCards(s.transform[2]));
   const def = getDefinition(data.type);
   const color = data.color ?? colorOf(def);
@@ -61,15 +65,15 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
         <div className="min-w-0 flex-1 leading-tight">
           <EditableName id={id} value={data.name} className="block truncate text-[12px] font-semibold text-fg" />
           <span className="block truncate font-mono text-[10px] text-muted">
-            {image ? `${image}${tag ? `:${tag}` : ''}` : addresses.map((a) => a.address).join(' · ') || 'container'}
+            {(has('os') && image ? `${image}${tag ? `:${tag}` : ''}` : has('ip') && addresses.map((a) => a.address).join(' · ')) || 'container'}
           </span>
         </div>
-        {image && addresses.length > 1 && (
+        {has('ip') && has('os') && image && addresses.length > 1 && (
           <span className="shrink-0 rounded bg-surface-2 px-1 font-mono text-[9px] text-muted" title={addresses.map((a) => a.address).join(', ')}>
             {addresses.length} IP
           </span>
         )}
-        {ports && (
+        {has('ports') && ports && (
           <span className="shrink-0 rounded bg-surface-2 px-1 font-mono text-[9px] text-muted" title={ports}>
             :{ports.split(',')[0].split(':')[0].trim()}
             {ports.includes(',') && '+'}
@@ -81,9 +85,10 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
   }
 
   const subtitle = str(data.props.role) || str(data.props.product) || def.label;
-  const badges = hasBadges(data.props);
-  const showChips = !!os || !!vlan || !!str(data.props.vlan) || addresses.some((a) => a.vlan);
-  const minHeight = requiredHeight({ data } as InfraNode) - 16;
+  const badges = has('services') && hasBadges(data.props);
+  const showVlan = has('vlan') && (!!vlan || !!str(data.props.vlan) || addresses.some((a) => a.vlan));
+  const showOs = has('os') && !!os;
+  const minHeight = requiredHeight({ data } as InfraNode, fields) - 16;
 
   return (
     <div
@@ -104,18 +109,18 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
       <IconTile
         icon={def.icon}
         color={color}
-        osIcon={os && def.role !== 'endpoint' ? os.icon : undefined}
+        osIcon={showOs && def.role !== 'endpoint' ? os.icon : undefined}
         osColor={os?.color}
       />
       <div className="min-w-0 flex-1 leading-tight">
         <div className="flex items-center gap-1.5">
           <EditableName id={id} value={data.name} className="min-w-0 truncate text-[13px] font-semibold text-fg" />
-          {hiddenIps > 0 && (
+          {has('ip') && hiddenIps > 0 && (
             <span className="shrink-0 rounded bg-surface-2 px-1 text-[9.5px] text-subtle" title={`${hiddenIps} hidden address${hiddenIps > 1 ? 'es' : ''} — listed in the properties panel`}>
               +{hiddenIps} IP
             </span>
           )}
-          {def.badge && (
+          {has('type') && def.badge && (
             <span
               className="shrink-0 rounded px-1 text-[9px] font-bold tracking-wide"
               style={{ background: alpha(color, 0.14), color }}
@@ -124,12 +129,16 @@ function DeviceNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode>) 
             </span>
           )}
         </div>
-        {addresses.length ? <AddressLines props={data.props} /> : <span className="block truncate text-[11px] text-muted">{subtitle}</span>}
-        <DetailLines props={data.props} />
-        {showChips && (
+        {has('ip') && addresses.length ? (
+          <AddressLines props={data.props} />
+        ) : (
+          has('subtitle') && <span className="block truncate text-[11px] text-muted">{subtitle}</span>
+        )}
+        {has('details') && <DetailLines props={data.props} />}
+        {(showVlan || showOs) && (
           <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden">
-            <VlanChips props={data.props} />
-            <OsChip osId={data.props.os} version={data.props.osVersion} />
+            {showVlan && <VlanChips props={data.props} />}
+            {showOs && <OsChip osId={data.props.os} version={data.props.osVersion} />}
           </div>
         )}
         {badges && (
