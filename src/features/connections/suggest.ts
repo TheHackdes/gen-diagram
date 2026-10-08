@@ -1,7 +1,7 @@
 import { getDefinition } from '../../data/catalog';
 import type { ConnectionType, InfraEdge, InfraEdgeData, InfraNode, NodeRole } from '../../types';
 import { str } from '../../utils/misc';
-import { addressEntries, hasVpn, hasWifi } from '../nodes/ips';
+import { addressEntries, hasVpn, hasWifi, interfaceName, interfacesOf, subInterface } from '../nodes/ips';
 
 const SWITCHING: NodeRole[] = ['switch', 'core-switch'];
 const INFRA_TRUNK: NodeRole[] = ['switch', 'core-switch', 'router', 'firewall', 'hypervisor', 'ap', 'bridge'];
@@ -40,11 +40,34 @@ function usedPorts(nodeId: string, edges: InfraEdge[]): Set<string> {
   return used;
 }
 
-/** Next free interface name for a node (eth0, Gi1/0/3…). */
+/**
+ * VLANs of the addresses configured on an interface of a device and on its
+ * VLAN sub-interfaces (bond0.99): one means an access port, several a trunk.
+ */
+export function interfaceVlans(node: InfraNode, port: string): string[] {
+  const named = addressEntries(node.data.props).map((e, i) => ({ vlan: e.vlan ?? '', name: interfaceName(node, e, i) }));
+  const vlans = named.filter((x) => x.vlan && (x.name === port || subInterface(x.name)?.parent === port)).map((x) => x.vlan);
+  return [...new Set(vlans)].sort((x, y) => Number(x) - Number(y));
+}
+
+/** Is this device a switch (its declared interfaces are virtual SVIs, not cable ports)? */
+export const isSwitching = (node: InfraNode) => SWITCHING.includes(getDefinition(node.data.type).role);
+
+/**
+ * Next free interface name for a node: an interface it already declares in
+ * its address list and no link uses yet, else the next port of its naming
+ * pattern (eth0, Gi1/0/3…). Switches declare virtual interfaces (SVIs): their
+ * links always take physical ports.
+ */
 export function nextPort(node: InfraNode, edges: InfraEdge[]): string {
   const def = getDefinition(node.data.type);
-  if (!def.portPattern) return '';
   const used = usedPorts(node.id, edges);
+  if (!SWITCHING.includes(def.role)) {
+    // A VLAN sub-interface (bond0.99) is carried by its parent's cable.
+    const declared = interfacesOf(node, edges).find((i) => !i.link && !used.has(i.name) && !subInterface(i.name));
+    if (declared) return declared.name;
+  }
+  if (!def.portPattern) return '';
   for (let i = 0; i < 512; i++) {
     const p = def.portPattern(i);
     if (!used.has(p)) return p;
@@ -137,12 +160,14 @@ export function suggestConnection(
     const endpoint = SWITCHING.includes(rs) ? target : source;
     const port = endpoint === source ? data.sourcePort : data.targetPort;
     const entries = addressEntries(endpoint.data.props);
-    // The address configured on the interface used by this link decides the access VLAN.
-    const onPort = entries.find((e) => e.label && e.label === port && e.vlan);
+    const onPort = port ? interfaceVlans(endpoint, port) : [];
     const vlans = [...new Set(entries.map((e) => e.vlan ?? '').filter(Boolean))];
-    if (onPort) {
+    if (onPort.length === 1) {
       data.mode = 'access';
-      data.vlan = onPort.vlan;
+      data.vlan = onPort[0];
+    } else if (onPort.length > 1) {
+      data.mode = 'trunk';
+      data.vlan = onPort.join(',');
     } else if (vlans.length > 1) {
       // Several networks on one link: tagged (trunk) with all of them.
       data.mode = 'trunk';

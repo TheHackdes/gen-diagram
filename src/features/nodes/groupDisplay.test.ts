@@ -4,7 +4,8 @@ import { useDiagram } from '../../store/diagramStore';
 import { node } from '../../test/helpers';
 import { cardFieldsAbove, DEFAULT_HEADER_FIELDS, headerFieldsOf, headerOptionsFor } from './groupDisplay';
 import { indexById } from './hierarchy';
-import { requiredHeight } from './ips';
+import { childTop, headerHeight, requiredHeight } from './ips';
+import { relayoutContainer } from '../layout/autoLayout';
 
 const threeIps = { ip: '10.0.0.1', ips: [{ address: '10.0.0.2' }, { address: '10.0.0.3' }], fw: true };
 
@@ -73,5 +74,40 @@ describe('member cards', () => {
     const na = nodes.find((n) => n.id === 'a')!;
     const nb = nodes.find((n) => n.id === 'b')!;
     expect(nb.position.y).toBe(na.position.y + na.height! + 10);
+  });
+
+  it('host headers follow the choice too, and their guests move with the header', () => {
+    const z = node('vlan-zone', 'z');
+    z.position = { x: 0, y: 0 };
+    z.width = 900;
+    z.height = 700;
+    const pve = node('proxmox', 'pve', { ...threeIps, vpn: true, vpnIp: '10.9.0.1', display: ['vpnIp'] }, 'z');
+    pve.position = { x: 20, y: 60 };
+    pve.width = 500;
+    pve.height = 400;
+    const vm = node('vm', 'vm', {}, 'pve');
+    vm.position = { x: 20, y: childTop(pve) };
+    const full = headerHeight(pve);
+    expect(headerHeight(pve, indexById([z, pve]))).toBe(full); // no choice: everything
+    expect(headerHeight(pve, ['os'])).toBeLessThan(full);
+
+    useDiagram.setState({ nodes: [z, pve, vm], edges: [] });
+    useDiagram.getState().updateNodeProps('z', { cardFields: ['os'] });
+    const get = (id: string) => useDiagram.getState().nodes.find((n) => n.id === id)!;
+    const delta = headerHeight(pve, ['os']) - full;
+    expect(get('vm').position.y).toBe(vm.position.y + delta);
+    expect(get('pve').height).toBe(400 + delta);
+
+    // Out of the zone: full header again, guests back below it.
+    useDiagram.getState().detachFromParent('pve');
+    expect(get('vm').position.y).toBe(vm.position.y);
+  });
+
+  it('auto layout starts guests right under the shorter header', () => {
+    const z = node('vlan-zone', 'z', { cardFields: ['os'] });
+    const pve = node('proxmox', 'pve', threeIps, 'z');
+    const vm = node('vm', 'vm', {}, 'pve');
+    const out = relayoutContainer([z, pve, vm], [], 'pve');
+    expect(out.find((n) => n.id === 'vm')!.position.y).toBe(childTop(pve, false, ['os']));
   });
 });

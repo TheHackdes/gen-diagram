@@ -10,7 +10,8 @@ export function suggestionFor(field: FieldDef, node: InfraNode, vlans: Vlan[], n
   const vlan = vlans.find((v) => String(v.id) === str(node.data.props.vlan));
   const parent = node.parentId ? nodes.find((n) => n.id === node.parentId) : undefined;
   const parentSubnet = parent && getDefinition(parent.data.type).kind === 'zone' ? zoneSubnet(parent, vlans) : '';
-  const subnet = str(node.data.props.network) || vlan?.subnet || parentSubnet;
+  // Addresses follow their VLAN, then the zone around them.
+  const subnet = vlan?.subnet || parentSubnet;
   switch (field.key) {
     case 'ip':
       return subnet ? suggestIp(subnet, nodes) || undefined : undefined;

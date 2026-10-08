@@ -30,7 +30,6 @@ const STORAGE_FIELDS = [
   { key: 'capacity', label: 'Capacity', type: 'text' as const, placeholder: '48 TB raw' },
   { key: 'protocols', label: 'Protocols', type: 'text' as const, placeholder: 'NFS, SMB, iSCSI' },
   F.vlan,
-  F.network,
   F.description,
   F.mac,
   F.vendor,

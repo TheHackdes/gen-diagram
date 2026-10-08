@@ -205,7 +205,6 @@ export function demoProject(): TemplateResult {
     osVersion: '13',
     ip: '192.168.10.10',
     vlan: '10',
-    gateway: '192.168.10.1',
     ips: [{ address: '192.168.99.5', label: 'mgmt', vlan: '99' }],
     fw: true,
     fwProduct: 'nftables',
@@ -239,7 +238,7 @@ export function demoProject(): TemplateResult {
   const back = b.add('docker-container', 'backend', { image: 'acme/backend', tag: '2.4.1', ip: '172.20.0.12', dockerNetwork: 'backend' }, docker);
   const pg = b.add('docker-container', 'postgres', { image: 'postgres', tag: '17', ip: '172.20.0.20', dockerNetwork: 'backend' }, docker);
   const redis = b.add('docker-container', 'redis', { image: 'redis', tag: '7.4', ip: '172.20.0.21', dockerNetwork: 'backend' }, docker);
-  const db = b.add('database-server', 'db-01', { os: 'rocky', osVersion: '9', ip: '192.168.20.40', vlan: '20', role: 'MariaDB (ERP)', gateway: '192.168.20.1', fw: true, fwProduct: 'firewalld', fwPolicy: 'Default deny' }, servers);
+  const db = b.add('database-server', 'db-01', { os: 'rocky', osVersion: '9', ip: '192.168.20.40', vlan: '20', role: 'MariaDB (ERP)', fw: true, fwProduct: 'firewalld', fwPolicy: 'Default deny' }, servers);
   const nas = b.add('nas', 'nas-01', { ip: '192.168.20.50', vlan: '20', capacity: '48 TB', protocols: 'NFS, SMB', services: ['files', 'backup'], ips: [{ address: '10.10.10.50', label: 'storage (NFS)' }] }, servers);
 
   const users = b.vlanZone(30);
@@ -248,8 +247,8 @@ export function demoProject(): TemplateResult {
   const prn = b.add('printer', 'prn-01', { ip: '192.168.30.20', vlan: '30' }, users);
 
   const dmz = b.vlanZone(50);
-  const rproxy = b.add('reverse-proxy', 'rproxy-01', { os: 'debian', osVersion: '13', ip: '192.168.50.10', vlan: '50', gateway: '192.168.50.1', fw: true, fwProduct: 'nftables', fwPolicy: 'Default deny', fwRules: [rule({ destination: '192.168.50.10', ports: '80,443', comment: 'Public web' }), rule({ direction: 'out', source: '192.168.50.10', destination: '192.168.50.20', ports: '8080', comment: 'To web-01' })] }, dmz);
-  const web = b.add('web-server', 'web-01', { os: 'ubuntu', osVersion: '24.04', ip: '192.168.50.20', vlan: '50', gateway: '192.168.50.1', fw: true, fwProduct: 'ufw', fwPolicy: 'Default deny', fwRules: [rule({ source: '192.168.50.10', destination: '192.168.50.20', ports: '8080', comment: 'From reverse proxy only' })] }, dmz);
+  const rproxy = b.add('reverse-proxy', 'rproxy-01', { os: 'debian', osVersion: '13', ip: '192.168.50.10', vlan: '50', fw: true, fwProduct: 'nftables', fwPolicy: 'Default deny', fwRules: [rule({ destination: '192.168.50.10', ports: '80,443', comment: 'Public web' }), rule({ direction: 'out', source: '192.168.50.10', destination: '192.168.50.20', ports: '8080', comment: 'To web-01' })] }, dmz);
+  const web = b.add('web-server', 'web-01', { os: 'ubuntu', osVersion: '24.04', ip: '192.168.50.20', vlan: '50', fw: true, fwProduct: 'ufw', fwPolicy: 'Default deny', fwRules: [rule({ source: '192.168.50.10', destination: '192.168.50.20', ports: '8080', comment: 'From reverse proxy only' })] }, dmz);
 
   b.link(inet, fw, { targetPort: 'port1 (WAN)' });
   b.link(fw, branch, { description: 'Site-to-site tunnel to the Lyon branch' });

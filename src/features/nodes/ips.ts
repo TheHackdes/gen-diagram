@@ -1,9 +1,9 @@
 import { getDefinition } from '../../data/catalog';
-import type { InfraNode, IpEntry } from '../../types';
+import type { InfraEdge, InfraNode, IpEntry } from '../../types';
 import { str } from '../../utils/misc';
 import { servicesOf } from '../../data/services';
 import { isArranged } from './arrange';
-import type { CardField } from './groupDisplay';
+import { cardFieldsAbove, type CardField } from './groupDisplay';
 import { detailLines } from './details';
 
 /** Additional addresses of a node (props.ips), tolerant to malformed data. */
@@ -54,6 +54,52 @@ export function defaultInterface(node: InfraNode, index: number, vlan: string): 
   return def.portPattern ? def.portPattern(index) : `eth${index}`;
 }
 
+/** Interface of an address: its name, or the default name of its position. */
+export function interfaceName(node: InfraNode, entry: IpEntry, index: number): string {
+  return (entry.label ?? '').trim() || defaultInterface(node, index, entry.vlan ?? '');
+}
+
+/** "bond0.99" → { parent: "bond0", vlan: "99" }: a tagged VLAN sub-interface. */
+export function subInterface(name: string): { parent: string; vlan: string } | null {
+  const m = name.match(/^(.*\S)\.(\d{1,4})$/);
+  return m ? { parent: m[1], vlan: m[2] } : null;
+}
+
+export interface DeclaredInterface {
+  /** Interface name as declared in the address list (eth0, vmbr0…). */
+  name: string;
+  /** Its addresses (an interface may carry several). */
+  addresses: string[];
+  /** VLAN of its first address. */
+  vlan: string;
+  /** Link plugged into it, if any: the link, the device on the other end and its port. */
+  link?: { edgeId: string; peer: string; peerPort: string };
+}
+
+/**
+ * Interfaces a device declares in its address list, with the link mapped to
+ * each one (a link port named like the interface).
+ */
+export function interfacesOf(node: InfraNode, edges: InfraEdge[]): DeclaredInterface[] {
+  const out = new Map<string, DeclaredInterface>();
+  addressEntries(node.data.props).forEach((e, i) => {
+    // An address without interface name sits on the default one (shown as placeholder in the editor).
+    const name = interfaceName(node, e, i);
+    if (!name) return;
+    const it = out.get(name) ?? { name, addresses: [], vlan: e.vlan ?? '' };
+    if (e.address) it.addresses.push(e.address);
+    out.set(name, it);
+  });
+  for (const e of edges) {
+    if (e.data?.connType === 'arrow' || e.data?.connType === 'logical') continue;
+    const mine = e.source === node.id ? e.data?.sourcePort : e.target === node.id ? e.data?.targetPort : undefined;
+    const it = mine ? out.get(mine) : undefined;
+    if (it && !it.link)
+      it.link = { edgeId: e.id, peer: e.source === node.id ? e.target : e.source, peerPort: (e.source === node.id ? e.data?.targetPort : e.data?.sourcePort) ?? '' };
+  }
+  return [...out.values()];
+}
+
 /** Addresses displayed on the diagram — all alike, in list order. */
 export function shownAddresses(props: Record<string, unknown>): IpEntry[] {
   return addressEntries(props).filter((e) => e.address && e.show !== false);
@@ -95,14 +141,27 @@ export function requiredHeight(node: InfraNode, show?: readonly CardField[]): nu
 }
 
 /**
+ * What a host header shows: the fields chosen by the group around it — given
+ * directly, or found from the node index — or everything.
+ */
+export type HeaderContext = Map<string, InfraNode> | readonly CardField[] | undefined;
+
+function shownIn(node: InfraNode, context: HeaderContext): readonly CardField[] | undefined {
+  return context instanceof Map ? cardFieldsAbove(node.parentId, context) : context;
+}
+
+/**
  * Height of the header of a host (hypervisor, Docker host): one line per
  * displayed address or service detail, so addresses are stacked, not inlined.
+ * Lines hidden by the group around the host do not take room.
  */
-export function headerHeight(node: InfraNode): number {
+export function headerHeight(node: InfraNode, context?: HeaderContext): number {
   const def = getDefinition(node.data.type);
   if (def.renderer === 'zone') return 44;
   if (def.renderer !== 'container') return 0;
-  return 48 + (addressLines(node.data.props) + detailLines(node.data.props).length) * LINE;
+  const show = shownIn(node, context);
+  const has = (k: CardField) => !show || show.includes(k);
+  return 48 + ((has('ip') ? addressLines(node.data.props) : 0) + (has('details') ? detailLines(node.data.props).length : 0)) * LINE;
 }
 
 /* Compact view of hosts --------------------------------------------- */
@@ -151,9 +210,9 @@ export function managedAncestors(nodeId: string, byId: Map<string, InfraNode>): 
 }
 
 /** Top offset of the children of a container. */
-export function childTop(node: InfraNode, compactRow = false): number {
+export function childTop(node: InfraNode, compactRow = false, context?: HeaderContext): number {
   if (compactRow) return COMPACT_HEADER + 4;
-  return headerHeight(node) + (isCompactHost(node) ? 8 : 12);
+  return headerHeight(node, context) + (isCompactHost(node) ? 8 : 12);
 }
 
 /** Adjust a device's height after its address list (or what its group shows) changed. */

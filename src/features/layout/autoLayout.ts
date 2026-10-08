@@ -233,7 +233,7 @@ function compactLayout(parent: InfraNode, ctx: Ctx, width: number, nested: boole
   const col = (k: InfraNode) => (cols > 1 ? Math.max(0, Math.min(cols - 1, Math.round((k.position.x - COMPACT_PAD) / pitch))) : 0);
   const kids = all.sort((p, q) => col(p) - col(q) || p.position.y - q.position.y || p.position.x - q.position.x);
   const perCol = cols > 1 ? linesPerColumn(a, kids.length) : Math.max(1, kids.length);
-  const top = childTop(parent, nested);
+  const top = childTop(parent, nested, nodeIndex(ctx.nodes).byId);
   let y = top;
   let bottom = top;
   kids.forEach((k, i) => {
@@ -272,7 +272,7 @@ function arrangeLayout(parent: InfraNode, ctx: Ctx, byId: Map<string, InfraNode>
   for (const k of kids) restoreCardSize(k, ctx);
   if (deep) for (const k of kids) if (ctx.children.get(k.id)?.length) layoutContainer(k, ctx, byId, deep);
   const size = (k: InfraNode) => ctx.sizes.get(k.id)!;
-  const top = childTop(parent);
+  const top = childTop(parent, false, nodeIndex(ctx.nodes).byId);
   const cols = Math.min(columnsFor(a, kids.length), kids.length);
 
   // Reading order, from the cell each member's center currently falls in.
@@ -353,7 +353,7 @@ function layoutContainer(parent: InfraNode, ctx: Ctx, byId: Map<string, InfraNod
       ? runDagre(sorted, pairs, ctx, { rankdir: 'TB', nodesep: GAP + 8, ranksep: 44 })
       : runShelf(sorted, ctx, GAP);
 
-  const top = childTop(parent);
+  const top = childTop(parent, false, nodeIndex(ctx.nodes).byId);
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;

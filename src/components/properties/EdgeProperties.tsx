@@ -1,8 +1,9 @@
 import { ArrowLeftRight, Trash } from 'lucide-react';
 import { getDefinition } from '../../data/catalog';
-import { CONNECTION_TYPES, nextPort } from '../../features/connections/suggest';
+import { CONNECTION_TYPES, interfaceVlans, isSwitching, nextPort } from '../../features/connections/suggest';
+import { interfacesOf, subInterface } from '../../features/nodes/ips';
+import type { InfraEdge, InfraEdgeData, InfraNode } from '../../types';
 import { useDiagram } from '../../store/diagramStore';
-import type { InfraEdge } from '../../types';
 import { Icon } from '../icons/Icon';
 import { Button, IconButton } from '../ui/Button';
 import { cn } from '../ui/cn';
@@ -10,6 +11,56 @@ import { FieldRow, Input, Segmented, Textarea } from '../ui/Field';
 import { VlanMultiSelect, VlanSelect } from './FieldEditor';
 import { BondSection, ParallelLinksSection } from './BondSection';
 import { Section } from './NodeProperties';
+
+/**
+ * Interfaces the device declares in its address list, to plug this link into.
+ * Switches declare virtual interfaces (SVIs): their ports are typed freely.
+ */
+function InterfacePicker({ node, peer, edge, side }: { node?: InfraNode; peer?: InfraNode; edge: InfraEdge; side: 'source' | 'target' }) {
+  const edges = useDiagram((s) => s.edges);
+  const nodes = useDiagram((s) => s.nodes);
+  const update = useDiagram((s) => s.updateEdge);
+  if (!node || isSwitching(node)) return null;
+  const list = interfacesOf(node, edges).filter((i) => !subInterface(i.name));
+  if (!list.length) return null;
+  const current = side === 'source' ? edge.data?.sourcePort : edge.data?.targetPort;
+  const name = (id: string) => nodes.find((n) => n.id === id)?.data.name ?? '?';
+  const pick = (iface: string) => {
+    const patch: Partial<InfraEdgeData> = side === 'source' ? { sourcePort: iface } : { targetPort: iface };
+    // Towards a switch, the interface's VLANs set the switchport: one is access, several a trunk.
+    if (peer && isSwitching(peer)) {
+      const vlans = interfaceVlans(node, iface);
+      if (vlans.length === 1) Object.assign(patch, { mode: 'access', vlan: vlans[0] });
+      else if (vlans.length > 1) Object.assign(patch, { mode: 'trunk', vlan: vlans.join(',') });
+    }
+    update(edge.id, patch);
+  };
+  return (
+    <div className="mt-1 flex flex-wrap gap-1" role="group" aria-label={`Interfaces of ${node.data.name}`}>
+      {list.map((i) => {
+        const active = current === i.name;
+        const taken = !!i.link && i.link.edgeId !== edge.id;
+        return (
+          <button
+            key={i.name}
+            type="button"
+            aria-pressed={active}
+            disabled={taken}
+            onClick={() => pick(i.name)}
+            title={taken ? `Used by the link to ${name(i.link!.peer)}${i.link!.peerPort ? ` (${i.link!.peerPort})` : ''}` : i.addresses.join(', ') || 'No address'}
+            className={cn(
+              'flex h-6 max-w-full items-center gap-1 rounded-md border px-1.5 font-mono text-[10.5px] transition-colors',
+              active ? 'border-primary bg-primary-soft text-primary' : taken ? 'cursor-not-allowed border-line text-subtle line-through opacity-60' : 'border-line text-muted hover:border-primary hover:text-fg',
+            )}
+          >
+            <span className="truncate">{i.name}</span>
+            {i.addresses[0] && <span className="truncate text-subtle">{i.addresses[0]}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const SPEEDS = ['100 Mbps', '1 Gbps', '2.5 Gbps', '10 Gbps', '25 Gbps', '40 Gbps', '100 Gbps', 'Wi-Fi 6', 'Wi-Fi 7'];
 
@@ -101,6 +152,7 @@ export function EdgeProperties({ edge }: { edge: InfraEdge }) {
                   placeholder={source ? nextPort(source, others) || 'eth0' : ''}
                   onChange={(e) => update(edge.id, { sourcePort: e.target.value })}
                 />
+                <InterfacePicker node={source} peer={target} edge={edge} side="source" />
               </FieldRow>
               <FieldRow label={`Port on ${target?.data.name ?? 'target'}`} htmlFor={id('tp')}>
                 <Input
@@ -110,6 +162,7 @@ export function EdgeProperties({ edge }: { edge: InfraEdge }) {
                   placeholder={target ? nextPort(target, others) || 'eth0' : ''}
                   onChange={(e) => update(edge.id, { targetPort: e.target.value })}
                 />
+                <InterfacePicker node={target} peer={source} edge={edge} side="target" />
               </FieldRow>
             </div>
           )}

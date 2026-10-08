@@ -1,5 +1,6 @@
 import { getDefinition } from '../../data/catalog';
 import type { InfraEdge, InfraNode, LayerId, NodeRole, ProjectSettings, ViewPreset, ViewSettings } from '../../types';
+import { nodeIndex } from '../nodes/hierarchy';
 import { childTop, hasHostFirewall, hasVpn } from '../nodes/ips';
 import { hasRules, rulesOf } from '../firewall/rules';
 
@@ -90,14 +91,14 @@ export const isFiltered = (v: ViewSettings) => v.hidden.length > 0 || v.preset =
 const nodeCopies = new WeakMap<InfraNode, { key: string; node: InfraNode }>();
 const edgeCopies = new WeakMap<InfraEdge, { key: string; edge: InfraEdge }>();
 
-function nodeVariant(n: InfraNode, hidden: boolean, dim: boolean, collapse: boolean): InfraNode {
+function nodeVariant(n: InfraNode, hidden: boolean, dim: boolean, collapse: boolean, byId: Map<string, InfraNode>): InfraNode {
   if (!hidden && !dim && !collapse) return n;
   const key = hidden ? 'h' : `${dim ? 'd' : ''}${collapse ? 'c' : ''}`;
   const cached = nodeCopies.get(n);
   if (cached?.key === key) return cached.node;
   const node: InfraNode = hidden ? { ...n, hidden: true } : { ...n, className: dim ? [n.className, 'view-dim'].filter(Boolean).join(' ') : n.className };
   // A host whose guests are all hidden shrinks to its header.
-  if (collapse) node.height = childTop(n) - 4;
+  if (collapse) node.height = childTop(n, false, byId) - 4;
   nodeCopies.set(n, { key, node });
   return node;
 }
@@ -135,12 +136,13 @@ export function applyView(nodes: InfraNode[], edges: InfraEdge[], view: ViewSett
     if (hidden) hiddenIds.add(n.id);
     if (n.parentId) visibleChildren.set(n.parentId, (visibleChildren.get(n.parentId) ?? 0) + (hidden ? 0 : 1));
   }
+  const byId = nodeIndex(nodes).byId;
   const outNodes = nodes.map((n) => {
     const hidden = hiddenIds.has(n.id);
     const relevant = security && !hidden && isSecurityRelevant(n);
     if (relevant) lit.add(n.id);
     const collapse = !hidden && getDefinition(n.data.type).kind === 'container' && visibleChildren.get(n.id) === 0;
-    return nodeVariant(n, hidden, security && !hidden && !relevant, collapse);
+    return nodeVariant(n, hidden, security && !hidden && !relevant, collapse, byId);
   });
   let hiddenEdges = 0;
   const outEdges = edges.map((e) => {

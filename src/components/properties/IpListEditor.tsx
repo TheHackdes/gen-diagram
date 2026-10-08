@@ -1,5 +1,5 @@
-import { Eye, EyeOff, Plus, Sparkles, X } from 'lucide-react';
-import { addressEntries, allIps, defaultInterface, entriesPatch } from '../../features/nodes/ips';
+import { Cable, Eye, EyeOff, Plus, Sparkles, X } from 'lucide-react';
+import { addressEntries, allIps, defaultInterface, entriesPatch, interfaceName, interfacesOf, subInterface } from '../../features/nodes/ips';
 import { suggestIp } from '../../features/nodes/operations';
 import { useDiagram } from '../../store/diagramStore';
 import type { FieldDef, InfraNode, IpEntry } from '../../types';
@@ -14,7 +14,14 @@ export function IpListEditor({ node, field }: { node: InfraNode; field: FieldDef
   const update = useDiagram((s) => s.updateNodeProps);
   const vlans = useDiagram((s) => s.vlans);
   const nodes = useDiagram((s) => s.nodes);
+  const edges = useDiagram((s) => s.edges);
+  const select = useDiagram((s) => s.select);
+  const renameInterface = useDiagram((s) => s.renameInterface);
   const entries = addressEntries(node.data.props);
+  // Link plugged into each interface (a VLAN sub-interface rides on its parent's cable).
+  const links = new Map(interfacesOf(node, edges).map((i) => [i.name, i.link]));
+  const linkOf = (name: string) => links.get(name) ?? links.get(subInterface(name)?.parent ?? '');
+  const nameOf = (id: string) => nodes.find((n) => n.id === id)?.data.name ?? '?';
   const write = (next: IpEntry[]) => update(node.id, entriesPatch(next));
   const subnetOf = (vlan: string | undefined) => vlans.find((v) => String(v.id) === vlan)?.subnet;
 
@@ -42,6 +49,9 @@ export function IpListEditor({ node, field }: { node: InfraNode; field: FieldDef
           const dupSelf = !!r.address && entries.some((e, j) => j !== i && e.address === r.address);
           const set = (patch: Partial<IpEntry>) => write(entries.map((x, j) => (j === i ? { ...x, ...patch } : x)));
           const shown = r.show !== false;
+          const iface = interfaceName(node, r, i);
+          const link = linkOf(iface);
+          const sub = subInterface(iface);
           return (
             <div key={i} className="rounded-lg border border-line p-1.5">
               <div className="flex items-center gap-1">
@@ -72,7 +82,20 @@ export function IpListEditor({ node, field }: { node: InfraNode; field: FieldDef
                 </button>
               </div>
               <div className="mt-1.5 grid grid-cols-[1fr_1.3fr] gap-1.5">
-                <Input aria-label="Interface" mono placeholder={defaultInterface(node, i, r.vlan ?? '')} value={r.label ?? ''} onChange={(e) => set({ label: e.target.value })} className="h-7 text-[12px]" />
+                <Input
+                  aria-label="Interface"
+                  mono
+                  placeholder={defaultInterface(node, i, r.vlan ?? '')}
+                  value={r.label ?? ''}
+                  onChange={(e) => {
+                    const label = e.target.value;
+                    set({ label });
+                    // Links plugged into this interface keep pointing to it (unless another address stays on the old name).
+                    const shared = entries.some((x, j) => j !== i && interfaceName(node, x, j) === iface);
+                    if (!shared) renameInterface(node.id, iface, interfaceName(node, { ...r, label }, i));
+                  }}
+                  className="h-7 text-[12px]"
+                />
                 <Select
                   aria-label="VLAN"
                   value={r.vlan ?? ''}
@@ -93,6 +116,20 @@ export function IpListEditor({ node, field }: { node: InfraNode; field: FieldDef
                   ))}
                 </Select>
               </div>
+              {link && (
+                <button
+                  type="button"
+                  onClick={() => select([], [link.edgeId])}
+                  className="mt-1 inline-flex max-w-full items-center gap-1 text-[11px] text-muted hover:text-fg"
+                  title="Select this link"
+                >
+                  <Cable size={11} className="shrink-0" />
+                  <span className="truncate">
+                    {sub ? `via ${sub.parent} ` : ''}↔ {nameOf(link.peer)}
+                    {link.peerPort && <span className="font-mono"> · {link.peerPort}</span>}
+                  </span>
+                </button>
+              )}
               {suggestion && (
                 <button type="button" onClick={() => set({ address: suggestion })} className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline">
                   <Sparkles size={11} /> Use {suggestion}

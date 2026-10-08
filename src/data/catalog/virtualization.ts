@@ -11,8 +11,6 @@ const hypervisorFields = (versionPlaceholder: string): FieldDef[] => [
   { key: 'version', label: 'Version', type: 'text', placeholder: versionPlaceholder },
   F.vlan,
   { key: 'cluster', label: 'Cluster', type: 'text', placeholder: 'pve-cluster-01' },
-  F.network,
-  F.gateway,
   F.description,
   F.cpu,
   F.ram,
@@ -53,8 +51,6 @@ const VM_FIELDS: FieldDef[] = [
   F.description,
   { key: 'disk', label: 'Disk', type: 'text', placeholder: '64 GB', advanced: true },
   { key: 'bridge', label: 'Bridge', type: 'text', placeholder: 'vmbr0', advanced: true, mono: true },
-  F.network,
-  { ...F.gateway, advanced: true },
   F.mac,
   F.dns,
 ];
@@ -70,8 +66,6 @@ const LXC_FIELDS: FieldDef[] = [
   F.description,
   { key: 'unprivileged', label: 'Unprivileged', type: 'boolean', advanced: true },
   { key: 'bridge', label: 'Bridge', type: 'text', placeholder: 'vmbr0', advanced: true, mono: true },
-  F.network,
-  { ...F.gateway, advanced: true },
   F.mac,
 ];
 
@@ -162,8 +156,6 @@ export const VIRTUALIZATION: ComponentDefinition[] = [
       F.vlan,
       F.description,
       { key: 'engine', label: 'Docker version', type: 'text', placeholder: '27.3', advanced: true },
-      F.network,
-      { ...F.gateway, advanced: true },
       F.mac,
     ],
     defaults: { runsOn: 'vm' },

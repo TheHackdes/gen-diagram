@@ -135,6 +135,8 @@ export interface DiagramState {
   addParallelLink: (id: string) => void;
   /** Create an aggregate / redundancy group from links (they may join different devices). */
   createBond: (edgeIds: string[], partial?: Partial<Bond>) => string | null;
+  /** An interface of a device was renamed: the links plugged into it follow. */
+  renameInterface: (nodeId: string, from: string, to: string) => void;
   /** New member link of a bond between two devices (e.g. to the second switch of an MLAG pair). */
   addBondMember: (bondId: string, fromId: string, toId: string) => string | null;
   updateBond: (id: string, patch: Partial<Bond>) => void;
@@ -186,6 +188,15 @@ function withLockFlags(n: InfraNode): InfraNode {
 }
 
 let lastCheckpoint = { key: '', time: 0 };
+
+/** A host header changed height by `delta`: its guests move with it and the host grows / shrinks. */
+function shiftGuests(nodes: InfraNode[], hostId: string, delta: number): InfraNode[] {
+  return nodes.map((n) => {
+    if (n.parentId === hostId) return { ...n, position: { ...n.position, y: n.position.y + delta } };
+    if (n.id === hostId) return { ...n, height: Math.max(140, (n.height ?? nodeSize(n).height) + delta), measured: undefined };
+    return n;
+  });
+}
 
 /** Raise these nodes above everything (their contents follow: React Flow draws a child above its parent). */
 function raiseToFront(nodes: InfraNode[], ids: Iterable<string>): InfraNode[] {
@@ -266,7 +277,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
    * Refit the cards of these nodes and everything inside them (their group
    * changed, or what it shows). Returns the nodes and the refitted ids.
    */
-  const refitCards = (nodes: InfraNode[], ids: string[]): { nodes: InfraNode[]; changed: string[] } => {
+  const refitCards = (nodes: InfraNode[], ids: string[], before?: InfraNode[]): { nodes: InfraNode[]; changed: string[] } => {
     const scope = new Set<string>();
     for (const id of ids) {
       scope.add(id);
@@ -274,13 +285,26 @@ export const useDiagram = create<DiagramState>((set, get) => {
     }
     const byId = indexById(nodes);
     const changed: string[] = [];
-    const out = nodes.map((n) => {
+    let out = nodes.map((n) => {
       // Compact lines have their own size.
       if (!scope.has(n.id) || getDefinition(n.data.type).kind !== 'device' || inCompactHost(n, byId)) return n;
       const next = fitDeviceHeight(n, cardFieldsAbove(n.parentId, byId));
       if (next !== n) changed.push(n.id);
       return next;
     });
+    // Host headers too: their guests follow the header when it grows or shrinks.
+    if (before) {
+      const prevById = indexById(before);
+      for (const id of scope) {
+        const host = byId.get(id);
+        const prev = prevById.get(id);
+        if (!host || !prev || getDefinition(host.data.type).kind !== 'container' || inCompactHost(host, byId)) continue;
+        const delta = headerHeight(host, byId) - headerHeight(prev, prevById);
+        if (!delta) continue;
+        out = shiftGuests(out, id, delta);
+        changed.push(id);
+      }
+    }
     return { nodes: changed.length ? out : nodes, changed };
   };
 
@@ -388,7 +412,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
       let position = { x: center.x - def.size.width / 2, y: center.y - def.size.height / 2 };
       if (parent) {
         const pAbs = absolutePosition(parent, byId);
-        position = { x: Math.max(16, position.x - pAbs.x), y: Math.max(childTop(parent) - 4, position.y - pAbs.y) };
+        position = { x: Math.max(16, position.x - pAbs.x), y: Math.max(childTop(parent, false, byId) - 4, position.y - pAbs.y) };
       }
       let node = createNodeFromPreset(preset, {
         position,
@@ -427,7 +451,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
       // Place after the last sibling, wrapping like a grid.
       const GAP = 16;
       let x = 24;
-      let y = childTop(parent);
+      let y = childTop(parent, false, indexById(nodes));
       if (siblings.length) {
         const lastRowY = Math.max(...siblings.map((s) => s.position.y));
         const lastRow = siblings.filter((s) => s.position.y === lastRowY);
@@ -463,8 +487,9 @@ export const useDiagram = create<DiagramState>((set, get) => {
 
     updateNodeProps: (id, patch) => {
       get().checkpoint(`props:${id}:${Object.keys(patch).join(',')}`);
-      const before = get().nodes.find((n) => n.id === id);
-      const oldHeader = before ? headerHeight(before) : 0;
+      const prevNodes = get().nodes;
+      const before = prevNodes.find((n) => n.id === id);
+      const oldHeader = before ? headerHeight(before, indexById(prevNodes)) : 0;
       set({
         nodes: get().nodes.map((n) => {
           if (n.id !== id) return n;
@@ -477,7 +502,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
       });
       // A group changed what its cards show: they take their new height.
       if ('cardFields' in patch) {
-        const { nodes, changed } = refitCards(get().nodes, [id]);
+        const { nodes, changed } = refitCards(get().nodes, [id], prevNodes);
         if (changed.length) {
           set({ nodes: fitContainersToChildren(nodes) });
           get().refreshCompact(changed);
@@ -489,15 +514,9 @@ export const useDiagram = create<DiagramState>((set, get) => {
       }
       // A host header that grew (more stacked addresses) pushes its guests down.
       const after = get().nodes.find((n) => n.id === id);
-      const delta = after ? headerHeight(after) - oldHeader : 0;
+      const delta = after ? headerHeight(after, indexById(get().nodes)) - oldHeader : 0;
       if (delta !== 0 && after) {
-        set({
-          nodes: get().nodes.map((n) => {
-            if (n.parentId === id) return { ...n, position: { ...n.position, y: n.position.y + delta } };
-            if (n.id === id) return { ...n, height: Math.max(140, (n.height ?? nodeSize(n).height) + delta), measured: undefined };
-            return n;
-          }),
-        });
+        set({ nodes: shiftGuests(get().nodes, id, delta) });
       }
     },
 
@@ -619,7 +638,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
       get().checkpoint();
       const kids = get().nodes.filter((n) => n.parentId === id).map((n) => n.id);
       // Released members follow what their new group shows.
-      commitNodes(refitCards(ungroupNode(get().nodes, id), kids).nodes);
+      commitNodes(refitCards(ungroupNode(get().nodes, id), kids, get().nodes).nodes);
     },
 
     toggleLock: (ids) => {
@@ -660,7 +679,8 @@ export const useDiagram = create<DiagramState>((set, get) => {
     },
 
     handleDragStop: (ids) => {
-      let nodes = get().nodes;
+      const start = get().nodes;
+      let nodes = start;
       const touched = new Set<string>(ids.flatMap((id) => {
         const n = nodes.find((x) => x.id === id);
         return n?.parentId ? [n.parentId] : [];
@@ -686,7 +706,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
             inherited = { ...inherited, width: def.size.width, height: def.size.height, measured: undefined };
           nodes = nodes.map((n) => (n.id === moved.id ? inherited : n));
           // Cards follow what their new group shows.
-          nodes = refitCards(nodes, [moved.id]).nodes;
+          nodes = refitCards(nodes, [moved.id], start).nodes;
           if (target) touched.add(target.id);
           changed = true;
         }
@@ -714,7 +734,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
           return { ...n, position: { x: pAbs.x + ps.width + 40 - grand.x, y: pAbs.y - grand.y } };
         });
       }
-      commitNodes(refitCards(nodes, [id]).nodes);
+      commitNodes(refitCards(nodes, [id], get().nodes).nodes);
     },
 
     align: (mode) => {
@@ -776,6 +796,24 @@ export const useDiagram = create<DiagramState>((set, get) => {
       const next = edges.map((e) => (ids.has(e.id) ? { ...e, data: { connType: 'ethernet' as const, ...e.data, bondId: bond.id } } : e));
       set({ edges: next, bonds: pruneBonds([...bonds, bond], next), dirty: true });
       return bond.id;
+    },
+    renameInterface: (nodeId, from, to) => {
+      if (!from || !to || from === to) return;
+      const edges = get().edges;
+      // Never steal a port name another link already uses on this device.
+      const taken = edges.some((e) => (e.source === nodeId && e.data?.sourcePort === to) || (e.target === nodeId && e.data?.targetPort === to));
+      if (taken) return;
+      let changed = false;
+      const next = edges.map((e) => {
+        if (!e.data) return e;
+        const src = e.source === nodeId && e.data.sourcePort === from;
+        const tgt = e.target === nodeId && e.data.targetPort === from;
+        if (!src && !tgt) return e;
+        changed = true;
+        return { ...e, data: { ...e.data, ...(src ? { sourcePort: to } : {}), ...(tgt ? { targetPort: to } : {}) } };
+      });
+      // Part of the address edit: same undo step.
+      if (changed) set({ edges: next, dirty: true });
     },
     addBondMember: (bondId, fromId, toId) => {
       const { edges, nodes } = get();

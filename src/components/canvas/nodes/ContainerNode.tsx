@@ -9,7 +9,8 @@ import { alpha, str } from '../../../utils/misc';
 import { cn } from '../../ui/cn';
 import { COMPACT_HEADER, headerHeight, hiddenAddressCount, shownAddresses } from '../../../features/nodes/ips';
 import { Icon } from '../../icons/Icon';
-import { useCompactFields, useInCompactHost } from './CompactRow';
+import { useCardFields, useCompactFields, useInCompactHost } from './CompactRow';
+import type { CardField } from '../../../features/nodes/groupDisplay';
 import { AddressLines, CapabilityBadges, DetailLines, EditableName, IconTile, NodeHandles, OsChip, Resizer, VlanChips } from './shared';
 
 const RUNS_ON: Record<string, string> = { vm: 'VM', physical: 'Bare metal', lxc: 'LXC' };
@@ -27,7 +28,10 @@ function ContainerNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode
   const hiddenCount = hiddenAddressCount(data.props);
   const version = str(data.props.version);
   const isDocker = def.role === 'docker-host';
-  const header = headerHeight({ data } as InfraNode);
+  // What the group around the host lets its header show (same choice as the cards).
+  const fields = useCardFields(parentId);
+  const has = (k: CardField) => !fields || fields.includes(k);
+  const header = headerHeight({ data } as InfraNode, fields);
   const compact = data.props.compact === true;
   const meta = isDocker ? '' : `${def.label}${version ? ` ${version}` : ''}`;
 
@@ -85,27 +89,27 @@ function ContainerNodeImpl({ id, data, selected, parentId }: NodeProps<InfraNode
         <div className="min-w-0 flex-1 leading-tight">
           <div className="flex items-center gap-1.5">
             <EditableName id={id} value={data.name} className="truncate text-[13px] font-semibold text-fg" />
-            {isDocker && str(data.props.runsOn) && (
+            {has('type') && isDocker && str(data.props.runsOn) && (
               <span className="shrink-0 rounded px-1 text-[9px] font-bold tracking-wide" style={{ background: alpha(color, 0.14), color }}>
                 {RUNS_ON[str(data.props.runsOn)] ?? ''}
               </span>
             )}
           </div>
           <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-muted">
-            <span className="truncate">{meta || def.label}</span>
-            {hiddenCount > 0 && (
+            {has('subtitle') && <span className="truncate">{meta || def.label}</span>}
+            {has('ip') && hiddenCount > 0 && (
               <span className="shrink-0 rounded bg-surface-2 px-1 text-[9.5px]" title="Hidden addresses — listed in the properties panel">
                 +{hiddenCount} hidden
               </span>
             )}
           </span>
-          <AddressLines props={data.props} />
-          <DetailLines props={data.props} />
+          {has('ip') && <AddressLines props={data.props} />}
+          {has('details') && <DetailLines props={data.props} />}
         </div>
         <div className="flex shrink-0 items-center gap-1 pt-1.5">
-          <CapabilityBadges props={data.props} max={5} />
-          <OsChip osId={data.props.os} version={data.props.osVersion} />
-          <VlanChips props={data.props} />
+          {has('services') && <CapabilityBadges props={data.props} max={5} />}
+          {has('os') && <OsChip osId={data.props.os} version={data.props.osVersion} />}
+          {has('vlan') && <VlanChips props={data.props} />}
           <span
             className="rounded-full px-1.5 py-px text-[10px] font-semibold"
             style={{ background: alpha(color, 0.12), color }}

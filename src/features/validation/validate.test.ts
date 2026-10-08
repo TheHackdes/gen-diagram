@@ -129,11 +129,17 @@ describe('every address is checked alike', () => {
     expect(r.some((m) => /192\.168\.99\.255 is the broadcast address/.test(m))).toBe(true);
     expect(r.some((m) => /10\.0\.0\.1 is outside VLAN 20/.test(m))).toBe(true);
   });
-  it('the gateway may be on any of the networks of a multi-homed host', () => {
-    const n = node('server', 'g', { ip: '192.168.20.10', vlan: '20', gateway: '192.168.99.1', ips: [{ address: '192.168.99.10', vlan: '99' }] });
-    expect(messages([n], [], [VLAN, V99]).some((m) => /gateway/.test(m))).toBe(false);
-    const bad = node('server', 'g2', { ip: '192.168.20.11', vlan: '20', gateway: '10.9.9.1' });
-    expect(messages([bad], [], [VLAN]).some((m) => /gateway 10\.9\.9\.1 is not on any/.test(m))).toBe(true);
+  it('the gateway of a server comes from the VLANs of its addresses', () => {
+    // VLAN 20 defines a gateway: nothing to report, even with a second address elsewhere.
+    const ok = node('server', 'g', { ip: '192.168.20.10', vlan: '20', ips: [{ address: '192.168.99.10', vlan: '99' }] });
+    expect(messages([ok], [], [VLAN, V99]).some((m) => /gateway/.test(m))).toBe(false);
+    const none = node('server', 'g2', { ip: '192.168.99.11', vlan: '99' });
+    expect(messages([none], [], [{ ...V99, gateway: undefined }])).toContain('info: g2 has no gateway: VLAN 99 defines none');
+    const loose = node('server', 'g3', { ip: '10.0.0.5' });
+    expect(messages([loose], [], [])).toContain('info: g3 has no gateway: put its address in a VLAN that defines one');
+    // The old per-device fields are no longer checked.
+    const legacy = node('server', 'g4', { ip: '192.168.20.12', vlan: '20', gateway: '10.9.9.1', network: '10.0.0.0/8' });
+    expect(messages([legacy], [], [VLAN]).some((m) => /gateway|in its network/.test(m))).toBe(false);
   });
 });
 

@@ -128,28 +128,29 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
     // A multi-homed device only needs one address in a given network.
     const anyIn = (subnet: string) => valid.some((v) => ipInCidr(v.address, subnet) === true);
     const list = valid.map((v) => v.address).join(', ');
-    const net = str(n.data.props.network);
-    if (isValidCidr(net) && !anyIn(net)) push({ severity: 'warning', message: `${n.data.name}: no address (${list}) in its network ${net}`, nodeIds: [n.id] });
     const zone = enclosingZone(n, byId);
     const zoneNet = zone ? zoneSubnet(zone, vlans) : '';
     // Equipment can sit in a zone with an address of its own VLAN (e.g. an AP managed in VLAN 99).
     const explained = valid.some((v) => v.subnet && ipInCidr(v.address, v.subnet) === true);
     if (zone && isValidCidr(zoneNet) && !anyIn(zoneNet) && !explained)
       push({ severity: 'warning', message: `${n.data.name}: no address (${list}) in ${zone.data.name} (${zoneNet})`, nodeIds: [n.id, zone.id] });
-    const gw = str(n.data.props.gateway);
-    const reachable = [net, ...valid.map((v) => v.subnet ?? '')].filter(isValidCidr);
-    if (isValidIPv4(gw) && reachable.length && !reachable.some((sn) => ipInCidr(gw, sn) === true))
-      push({ severity: 'warning', message: `${n.data.name}: gateway ${gw} is not on any of its networks (${reachable.join(', ')})`, nodeIds: [n.id] });
   }
 
-  // --- Servers without gateway (when the VLAN does not define one) -----
+  // --- Servers without gateway: the VLANs of their addresses define it ---
   for (const n of nodes) {
-    const def = getDefinition(n.data.type);
-    if (def.role !== 'server' || !definitionHasField(def, 'gateway')) continue;
-    if (!str(n.data.props.ip) || str(n.data.props.gateway)) continue;
+    if (getDefinition(n.data.type).role !== 'server') continue;
+    const entries = addressEntries(n.data.props).filter((e) => e.address);
+    if (!entries.length) continue;
     // Any of its VLANs may provide the gateway.
-    const viaVlan = addressEntries(n.data.props).some((e) => vlanById.get(e.vlan ?? '')?.gateway);
-    if (!viaVlan) push({ severity: 'info', message: `${n.data.name} has no gateway`, nodeIds: [n.id] });
+    if (entries.some((e) => vlanById.get(e.vlan ?? '')?.gateway)) continue;
+    const ids = [...new Set(entries.map((e) => e.vlan).filter((v): v is string => !!v && vlanById.has(v)))];
+    push({
+      severity: 'info',
+      message: ids.length
+        ? `${n.data.name} has no gateway: VLAN ${ids.join(', ')} defines none`
+        : `${n.data.name} has no gateway: put its address in a VLAN that defines one`,
+      nodeIds: [n.id],
+    });
   }
 
   // --- VLAN definitions ------------------------------------------------
