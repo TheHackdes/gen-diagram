@@ -3,6 +3,7 @@ import { getDefinition } from '../../data/catalog';
 import type { Bond, BondModeId, InfraEdge, InfraNode, IssueSeverity } from '../../types';
 import { str, uid } from '../../utils/misc';
 import { parseSpeed } from './parallel';
+import { isBondable } from './suggest';
 
 export interface BondModeInfo {
   id: BondModeId;
@@ -128,9 +129,9 @@ export function analyzeBond(bond: Bond, edges: InfraEdge[], nodes: InfraNode[]):
   }
 
   const nameOf = (id: string) => byId.get(id)?.data.name ?? '?';
-  const physical = members.every((e) => ['ethernet', 'fiber'].includes(e.data?.connType ?? 'ethernet'));
+  const physical = members.every(isBondable);
   if (info.kind === 'aggregate') {
-    if (!physical) problems.push({ severity: 'error', message: `${name}: ${info.short} bonds only physical Ethernet/fiber links` });
+    if (!physical) problems.push({ severity: 'error', message: `${name}: ${info.short} only bonds cables (Ethernet, fiber, trunk links)` });
     if (info.partnerAssisted) {
       for (const side of sides) {
         if (side.length < 2) continue;
@@ -228,4 +229,103 @@ export function migrateLegacyBonds(edges: InfraEdge[], bonds: Bond[]): { edges: 
 export function pruneBonds(bonds: Bond[], edges: InfraEdge[]): Bond[] {
   const used = new Set(edges.map((e) => e.data?.bondId).filter(Boolean));
   return bonds.filter((b) => used.has(b.id));
+}
+
+/* Building bonds ---------------------------------------------------- */
+
+const PROBE = '__probe';
+
+const isPhysicalLink = isBondable;
+
+/** Errors of a bond made of `members` with `mode` (nothing is changed). */
+function errorsOf(mode: BondModeId, members: InfraEdge[], nodes: InfraNode[]): number {
+  const tagged = members.map((e) => ({ ...e, data: { connType: 'ethernet' as const, ...e.data, bondId: PROBE } }));
+  return analyzeBond({ id: PROBE, name: '', mode }, tagged, nodes).problems.filter((p) => p.severity === 'error').length;
+}
+
+/**
+ * Mode a new bond should start with: the first one valid for its members —
+ * LACP when each side is one device or one stack / MLAG group, active-backup
+ * from one host to independent switches, otherwise a redundancy group
+ * (independent paths, logical links).
+ */
+export function suggestBondMode(members: InfraEdge[], nodes: InfraNode[]): BondModeId {
+  const order: BondModeId[] = members.every(isPhysicalLink) ? ['lacp', 'active-backup', 'redundancy'] : ['redundancy'];
+  return order.find((m) => errorsOf(m, members, nodes) === 0) ?? order[order.length - 1];
+}
+
+/** Would adding `edge` to `bond` keep it valid (no new error)? */
+export function canJoinBond(bond: Bond, edge: InfraEdge, edges: InfraEdge[], nodes: InfraNode[]): boolean {
+  if (edge.data?.bondId === bond.id) return false;
+  const members = bondMembers(bond.id, edges);
+  if (!members.length) return false;
+  return errorsOf(bond.mode, [...members, edge], nodes) <= errorsOf(bond.mode, members, nodes);
+}
+
+/** The redundancy group of a device and its peers (stack, MLAG / vPC pair, HA cluster). */
+function withPeers(ids: string[], nodes: InfraNode[]): string[] {
+  const groups = new Set(ids.map((id) => redundancyGroup(nodes.find((n) => n.id === id))).filter(Boolean));
+  const peers = nodes.filter((n) => groups.has(redundancyGroup(n))).map((n) => n.id);
+  return [...new Set([...ids, ...peers])];
+}
+
+export interface BondSuggestion {
+  edge: InfraEdge;
+  /** Mode the bond would get with this link. */
+  mode: BondModeId;
+  /** Why it is related: same devices, a common device, or the same stack / MLAG group. */
+  reason: 'parallel' | 'shared-device' | 'group';
+}
+
+/**
+ * Unbonded links that can form a bond with `edge`: between the same devices,
+ * from the same device to another one (host → second switch), or between the
+ * same stack / MLAG groups (A→B and C→D when A, C and B, D are pairs).
+ */
+export function bondSuggestions(edge: InfraEdge, edges: InfraEdge[], nodes: InfraNode[]): BondSuggestion[] {
+  // Annotation arrows are not network links.
+  if (edge.data?.connType === 'arrow') return [];
+  const ends = [edge.source, edge.target];
+  const related = new Set(withPeers(ends, nodes));
+  const out: BondSuggestion[] = [];
+  for (const e of edges) {
+    if (e.id === edge.id || e.data?.bondId || isPhysicalLink(e) !== isPhysicalLink(edge)) continue;
+    if (e.data?.connType === 'arrow') continue;
+    const other = [e.source, e.target];
+    const shared = other.filter((id) => ends.includes(id)).length;
+    const reason: BondSuggestion['reason'] | undefined =
+      shared === 2 ? 'parallel' : shared === 1 ? 'shared-device' : other.every((id) => related.has(id)) ? 'group' : undefined;
+    if (!reason) continue;
+    // A link to a device on both sides at once cannot be bonded.
+    const mode = suggestBondMode([edge, e], nodes);
+    if (errorsOf(mode, [edge, e], nodes) > 0) continue;
+    out.push({ edge: e, mode, reason });
+  }
+  const rank = { parallel: 0, 'shared-device': 1, group: 2 };
+  return out.sort((a, b) => rank[a.reason] - rank[b.reason] || cmpId(a.edge.id, b.edge.id));
+}
+
+export interface MemberTarget {
+  from: string;
+  to: string;
+}
+
+/**
+ * Where a new member of `bond` can go: between a device of one side and a
+ * device of the other side — or their stack / MLAG peers (e.g. the second
+ * switch of an MLAG pair) — as long as the bond stays valid.
+ */
+export function memberTargets(bond: Bond, edges: InfraEdge[], nodes: InfraNode[]): MemberTarget[] {
+  const analysis = analyzeBond(bond, edges, nodes);
+  const base = analysis.members[0];
+  if (!base) return [];
+  const [left, right] = analysis.sides.map((side) => withPeers(side, nodes));
+  const out: MemberTarget[] = [];
+  for (const from of left)
+    for (const to of right) {
+      if (from === to) continue;
+      const probe: InfraEdge = { id: '__new', source: from, target: to, data: { ...base.data!, bondId: undefined } };
+      if (canJoinBond(bond, probe, edges, nodes)) out.push({ from, to });
+    }
+  return out;
 }

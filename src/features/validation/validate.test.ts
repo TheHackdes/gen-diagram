@@ -21,6 +21,35 @@ describe('validation rules', () => {
     expect(r.some((m) => /10\.0\.0\.1 is duplicated/.test(m))).toBe(true);
   });
 
+  it('a public / virtual IP is shared inside an HA cluster, not across devices', () => {
+    const fw1 = node('firewall', 'fw1', { publicIp: '203.0.113.10', redundancyGroup: 'ha' });
+    const fw2 = node('firewall', 'fw2', { publicIp: '203.0.113.10', redundancyGroup: 'ha' });
+    const other = node('firewall', 'fw3', { publicIp: '203.0.113.10' });
+    expect(messages([fw1, fw2], [], []).some((m) => /duplicated/.test(m))).toBe(false);
+    expect(messages([fw1, fw2, other], [], []).some((m) => /203\.0\.113\.10 is duplicated/.test(m))).toBe(true);
+    // Own addresses stay unique even inside a cluster.
+    const a = node('firewall', 'a', { ip: '10.0.0.1', redundancyGroup: 'ha2' });
+    const b = node('firewall', 'b', { ip: '10.0.0.1', redundancyGroup: 'ha2' });
+    expect(messages([a, b], [], []).some((m) => /10\.0\.0\.1 is duplicated/.test(m))).toBe(true);
+  });
+
+  it('access and core switches can be in one stack / MLAG pair', () => {
+    const a = node('switch', 'a', { redundancyGroup: 'mlag' });
+    const b = node('l3-switch', 'b', { redundancyGroup: 'mlag' });
+    const c = node('router', 'c', { redundancyGroup: 'mix' });
+    const d = node('switch', 'd', { redundancyGroup: 'mix' });
+    const r = messages([a, b, c, d], [], []);
+    expect(r.some((m) => /“mlag” mixes/.test(m))).toBe(false);
+    expect(r.some((m) => /“mix” mixes/.test(m))).toBe(true);
+  });
+
+  it('a catch-all rule only shadows the later rules of the same direction', () => {
+    const rule = (direction: string, source = 'any', protocol = 'any') => ({ id: direction + source, action: 'deny', direction, source, destination: 'any', protocol, ports: '', enabled: true });
+    const fw = (rules: unknown[]) => node('firewall', 'fw', { fwRules: rules });
+    expect(messages([fw([rule('in'), rule('out', '10.0.0.0/8', 'tcp')])], [], []).some((m) => /never used/.test(m))).toBe(false);
+    expect(messages([fw([rule('out'), rule('out', '10.0.0.0/8', 'tcp')])], [], []).some((m) => /all outgoing traffic — the 1 out rule after it is never used/.test(m))).toBe(true);
+  });
+
   it('a tunnel interface can serve several peers', () => {
     const hub = node('firewall', 'hub', { vpn: true });
     const s1 = node('router', 's1', { vpn: true });

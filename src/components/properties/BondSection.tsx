@@ -1,9 +1,12 @@
-import { CircleAlert, Info, Link2, Plus, TriangleAlert, Unlink } from 'lucide-react';
-import { analyzeBond, BOND_MODES, bondMembers, bondTitle, modeInfo } from '../../features/connections/bonds';
+import { ChevronDown, CircleAlert, Info, Link2, Plus, TriangleAlert, Unlink } from 'lucide-react';
+import { useState } from 'react';
+import { analyzeBond, BOND_MODES, bondMembers, bondSuggestions, bondTitle, canJoinBond, memberTargets, modeInfo, suggestBondMode } from '../../features/connections/bonds';
 import { parallelEdges } from '../../features/connections/parallel';
+import { isBondable } from '../../features/connections/suggest';
 import { useDiagram } from '../../store/diagramStore';
 import type { Bond, BondModeId, InfraEdge, IssueSeverity } from '../../types';
 import { Button } from '../ui/Button';
+import { Dropdown, type MenuEntry } from '../ui/Menu';
 import { cn } from '../ui/cn';
 import { FieldRow, Input, Select } from '../ui/Field';
 import { Section } from './NodeProperties';
@@ -14,7 +17,7 @@ const SEVERITY_ICON: Record<IssueSeverity, React.ReactNode> = {
   info: <Info size={13} className="mt-px shrink-0 text-primary" />,
 };
 
-const isPhysical = (e: InfraEdge) => ['ethernet', 'fiber'].includes(e.data?.connType ?? 'ethernet');
+const isPhysical = isBondable;
 
 /** Links drawn between the same two devices. */
 export function ParallelLinksSection({ edge }: { edge: InfraEdge }) {
@@ -70,11 +73,22 @@ function BondDetails({ bond, edge }: { bond: Bond; edge: InfraEdge }) {
   const updateBond = useDiagram((s) => s.updateBond);
   const removeFromBond = useDiagram((s) => s.removeFromBond);
   const deleteBond = useDiagram((s) => s.deleteBond);
-  const addParallel = useDiagram((s) => s.addParallelLink);
+  const addMember = useDiagram((s) => s.addBondMember);
+  const name = (id: string) => nodes.find((n) => n.id === id)?.data.name ?? '?';
   const select = useDiagram((s) => s.select);
   const analysis = analyzeBond(bond, edges, nodes);
+  // New members can go to any device of the other side, or to its stack / MLAG peers.
+  const targets = memberTargets(bond, edges, nodes);
+  const memberItems: MenuEntry[] = targets.map((t) => {
+    const parallel = (t.from === edge.source && t.to === edge.target) || (t.from === edge.target && t.to === edge.source);
+    return {
+      id: `${t.from}>${t.to}`,
+      label: `${name(t.from)} → ${name(t.to)}`,
+      description: parallel ? 'Same devices as this link' : analysis.sides.flat().includes(t.to) && analysis.sides.flat().includes(t.from) ? undefined : 'Stack / MLAG peer',
+      onSelect: () => addMember(bond.id, t.from, t.to),
+    };
+  });
   const info = modeInfo(bond.mode);
-  const name = (id: string) => nodes.find((n) => n.id === id)?.data.name ?? '?';
   const physical = analysis.members.every(isPhysical);
   const modes = physical ? BOND_MODES : BOND_MODES.filter((m) => m.kind === 'redundancy');
 
@@ -145,9 +159,14 @@ function BondDetails({ bond, edge }: { bond: Bond; edge: InfraEdge }) {
       )}
 
       <div className="flex flex-wrap gap-1.5">
-        <Button size="xs" icon={<Plus size={13} />} onClick={() => addParallel(edge.id)} title="New member between the same devices, on the next free ports">
-          Add member link
-        </Button>
+        <Dropdown
+          items={memberItems.length ? memberItems : [{ id: 'none', label: 'No valid member for this mode', disabled: true }]}
+          trigger={({ open, toggle }) => (
+            <Button size="xs" icon={<Plus size={13} />} onClick={toggle} aria-expanded={open} title="New member link, on the next free ports">
+              Add member link <ChevronDown size={12} />
+            </Button>
+          )}
+        />
         <Button size="xs" variant="ghost" icon={<Unlink size={13} />} onClick={() => removeFromBond([edge.id])}>
           Remove this link
         </Button>
@@ -171,40 +190,68 @@ export function BondSection({ edge }: { edge: InfraEdge }) {
   const addToBond = useDiagram((s) => s.addToBond);
   const bond = bonds.find((b) => b.id === edge.data?.bondId);
   const physical = isPhysical(edge);
-  const parallel = parallelEdges(edges, edge).filter((e) => !e.data?.bondId);
-  // Bonds this link could join: they already involve one of its devices.
-  const candidates = bonds.filter((b) => {
-    if (b.id === bond?.id) return false;
-    const members = bondMembers(b.id, edges);
-    if (!members.length || members.every(isPhysical) !== physical) return false;
-    return members.some((m) => [m.source, m.target].some((id) => id === edge.source || id === edge.target));
-  });
+  const suggestions = bond ? [] : bondSuggestions(edge, edges, nodes);
+  // Parallel links are checked by default: that is the classic bond.
+  const [picked, setPicked] = useState<Set<string> | null>(null);
+  const chosen = picked ?? new Set(suggestions.filter((x) => x.reason === 'parallel').map((x) => x.edge.id));
+  const members = [edge, ...suggestions.filter((x) => chosen.has(x.edge.id)).map((x) => x.edge)];
+  const mode = modeInfo(suggestBondMode(members, nodes));
+  // Bonds this link can join without breaking their rules (any devices for redundancy groups).
+  const candidates = bonds.filter((b) => b.id !== bond?.id && canJoinBond(b, edge, edges, nodes));
+  const name = (id: string) => nodes.find((n) => n.id === id)?.data.name ?? '?';
   const nameOf = (b: Bond) => {
-    const members = bondMembers(b.id, edges);
-    const peers = new Set(members.flatMap((m) => [m.source, m.target]));
-    return `${bondTitle(b)} (${[...peers].map((id) => nodes.find((n) => n.id === id)?.data.name).join(', ')})`;
+    const peers = new Set(bondMembers(b.id, edges).flatMap((m) => [m.source, m.target]));
+    return `${bondTitle(b)} (${[...peers].map(name).join(', ')})`;
   };
+  const toggle = (id: string) => {
+    const next = new Set(chosen);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setPicked(next);
+  };
+  const REASON = { parallel: 'same devices', 'shared-device': 'same device', group: 'same stack / MLAG' } as const;
 
   return (
     <Section title={bond ? 'Aggregate' : physical ? 'Bond / link aggregation' : 'Redundancy group'}>
       {bond ? (
         <BondDetails bond={bond} edge={edge} />
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
           <p className="text-[11.5px] leading-snug text-subtle">
             {physical
-              ? 'Group links into a bond (LACP, active-backup…). Members can go to different devices, e.g. two switches of an MLAG pair.'
+              ? 'Group links into one bond. Members can join different devices: a host to both switches of an MLAG pair, a stack to an MLAG pair…'
               : 'Mark redundant paths (dual WAN, backup VPN…) as one group.'}
           </p>
-          <div className="flex flex-wrap gap-1.5">
-            <Button
-              size="xs"
-              variant="primary"
-              icon={<Link2 size={13} />}
-              onClick={() => createBond(parallel.length > 1 ? parallel.map((e) => e.id) : [edge.id], { mode: physical ? 'lacp' : 'redundancy' })}
-            >
-              {parallel.length > 1 ? `Bond the ${parallel.length} parallel links` : physical ? 'Create bond' : 'Create group'}
+          {suggestions.length > 0 && (
+            <fieldset>
+              <legend className="mb-1 text-xs font-medium text-muted">Bond with</legend>
+              <ul className="space-y-0.5">
+                {suggestions.map((x) => {
+                  const e = x.edge;
+                  return (
+                    <li key={e.id}>
+                      <label className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-[11.5px] text-fg hover:bg-surface-2">
+                        <input type="checkbox" className="accent-[var(--primary)]" checked={chosen.has(e.id)} onChange={() => toggle(e.id)} />
+                        <span className="min-w-0 truncate">
+                          {name(e.source)} <span className="font-mono text-[10.5px] text-muted">{e.data?.sourcePort}</span> → {name(e.target)}{' '}
+                          <span className="font-mono text-[10.5px] text-muted">{e.data?.targetPort}</span>
+                        </span>
+                        <span className="ml-auto shrink-0 text-[10.5px] text-subtle">{REASON[x.reason]}</span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            </fieldset>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="xs" variant="primary" icon={<Link2 size={13} />} onClick={() => createBond(members.map((e) => e.id), { mode: mode.id })}>
+              {physical ? 'Create bond' : 'Create group'}
+              {members.length > 1 ? ` (${members.length} links)` : ''}
             </Button>
+            <span className="text-[11px] text-subtle">
+              Mode: <span className="font-medium text-muted">{mode.label}</span>
+            </span>
           </div>
           {candidates.length > 0 && (
             <div>

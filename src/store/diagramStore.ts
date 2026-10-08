@@ -11,7 +11,7 @@ import { canContain, definitionHasField, getDefinition, getPreset } from '../dat
 import { getOperatingSystem, setCustomOperatingSystems } from '../data/operatingSystems';
 import { TEMPLATES } from '../data/templates';
 import { VLAN_COLORS } from '../data/templates/builder';
-import { migrateLegacyBonds, pruneBonds, suggestBondNames } from '../features/connections/bonds';
+import { migrateLegacyBonds, pruneBonds, suggestBondMode, suggestBondNames } from '../features/connections/bonds';
 import { parallelEdges } from '../features/connections/parallel';
 import { suggestConnection } from '../features/connections/suggest';
 import { autoLayout, relayoutContainer } from '../features/layout/autoLayout';
@@ -44,6 +44,7 @@ import {
 import { DEFAULT_SETTINGS, fromProjectFile, toProjectFile, type DiagramContent } from '../features/projects/serialization';
 import { saveProjectFile } from '../features/projects/storage';
 import { flowApi } from '../features/canvas/flowApi';
+import { useUi } from './uiStore';
 import { cardFieldsAbove } from '../features/nodes/groupDisplay';
 import type {
   Bond,
@@ -134,6 +135,8 @@ export interface DiagramState {
   addParallelLink: (id: string) => void;
   /** Create an aggregate / redundancy group from links (they may join different devices). */
   createBond: (edgeIds: string[], partial?: Partial<Bond>) => string | null;
+  /** New member link of a bond between two devices (e.g. to the second switch of an MLAG pair). */
+  addBondMember: (bondId: string, fromId: string, toId: string) => string | null;
   updateBond: (id: string, patch: Partial<Bond>) => void;
   addToBond: (bondId: string, edgeIds: string[]) => void;
   removeFromBond: (edgeIds: string[]) => void;
@@ -183,6 +186,14 @@ function withLockFlags(n: InfraNode): InfraNode {
 }
 
 let lastCheckpoint = { key: '', time: 0 };
+
+/** Raise these nodes above everything (their contents follow: React Flow draws a child above its parent). */
+function raiseToFront(nodes: InfraNode[], ids: Iterable<string>): InfraNode[] {
+  const set_ = new Set(ids);
+  if (!set_.size) return nodes;
+  const z = Math.max(0, ...nodes.map((n) => n.zIndex ?? 0)) + 1;
+  return nodes.map((n) => (set_.has(n.id) ? { ...n, zIndex: z } : n));
+}
 
 /** Settings shared by parallel links (type, speed, VLANs, bond); ports stay per-link. */
 function inheritParallel(sibling: InfraEdge, suggested: InfraEdgeData): InfraEdgeData {
@@ -551,7 +562,8 @@ export const useDiagram = create<DiagramState>((set, get) => {
       }
       const known = new Set(get().edges.map((e) => e.id));
       const cloned = cloneBonds(result.edges.filter((e) => !known.has(e.id)), get().bonds);
-      set({ nodes: result.nodes, edges: [...result.edges.filter((e) => known.has(e.id)), ...cloned.edges], bonds: cloned.bonds, dirty: true });
+      // What is pasted comes in front of everything.
+      set({ nodes: raiseToFront(result.nodes, result.newIds), edges: [...result.edges.filter((e) => known.has(e.id)), ...cloned.edges], bonds: cloned.bonds, dirty: true });
     },
 
     duplicateSelection: () => {
@@ -561,7 +573,7 @@ export const useDiagram = create<DiagramState>((set, get) => {
       const result = pasteClipboard(get().nodes, get().edges, clip, { offset: { x: 32, y: 32 }, keepParent: true });
       const known = new Set(get().edges.map((e) => e.id));
       const cloned = cloneBonds(result.edges.filter((e) => !known.has(e.id)), get().bonds);
-      commitNodes(fitContainersToChildren(result.nodes), {
+      commitNodes(fitContainersToChildren(raiseToFront(result.nodes, result.newIds)), {
         edges: [...result.edges.filter((e) => known.has(e.id)), ...cloned.edges],
         bonds: cloned.bonds,
       });
@@ -584,9 +596,21 @@ export const useDiagram = create<DiagramState>((set, get) => {
     groupSelection: () => {
       const ids = selectedIds();
       if (!ids.size) return;
+      const all = get().nodes;
+      const roots = selectionRoots(all, ids);
+      const parent = all.find((n) => n.id === roots[0]?.parentId);
+      // A host only holds its own kind of guests (VMs, containers…): no group inside it.
+      if (parent && !canContain(parent.data.type, 'group')) {
+        useUi.getState().toast(`Elements inside ${parent.data.name} cannot be grouped — group ${parent.data.name} itself instead`, 'error');
+        return;
+      }
       get().checkpoint();
-      const { nodes } = groupNodes(get().nodes, ids);
+      const { nodes, groupId } = groupNodes(all, ids);
       commitNodes(nodes);
+      const left = roots.filter((r) => r.parentId !== roots[0].parentId).length;
+      if (left) useUi.getState().toast(`${left} selected element${left > 1 ? 's are' : ' is'} in another container and stayed out of the group`, 'info');
+      // An arranged group around the new one makes room for it.
+      if (groupId) get().refreshCompact([groupId]);
     },
 
     ungroup: (id) => {
@@ -708,10 +732,8 @@ export const useDiagram = create<DiagramState>((set, get) => {
     },
 
     bringToFront: (ids) => {
-      const set_ = new Set(ids);
-      const max = Math.max(0, ...get().nodes.map((n) => n.zIndex ?? 0));
       get().checkpoint();
-      set({ nodes: get().nodes.map((n) => (set_.has(n.id) ? { ...n, zIndex: max + 1 } : n)), dirty: true });
+      set({ nodes: raiseToFront(get().nodes, ids), dirty: true });
     },
     sendToBack: (ids) => {
       const set_ = new Set(ids);
@@ -743,15 +765,30 @@ export const useDiagram = create<DiagramState>((set, get) => {
     },
     createBond: (edgeIds, partial = {}) => {
       const { edges, nodes, bonds } = get();
-      const members = edges.filter((e) => edgeIds.includes(e.id));
+      // Annotation arrows are not network links.
+      const members = edges.filter((e) => edgeIds.includes(e.id) && e.data?.connType !== 'arrow');
       if (!members.length) return null;
       get().checkpoint();
       const names = suggestBondNames(members, nodes, bonds);
-      const bond: Bond = { id: uid('b_'), mode: 'lacp', ...names, ...partial };
+      // Start with a mode that is valid for these links (LACP, active-backup or a redundancy group).
+      const bond: Bond = { id: uid('b_'), mode: suggestBondMode(members, nodes), ...names, ...partial };
       const ids = new Set(members.map((e) => e.id));
       const next = edges.map((e) => (ids.has(e.id) ? { ...e, data: { connType: 'ethernet' as const, ...e.data, bondId: bond.id } } : e));
       set({ edges: next, bonds: pruneBonds([...bonds, bond], next), dirty: true });
       return bond.id;
+    },
+    addBondMember: (bondId, fromId, toId) => {
+      const { edges, nodes } = get();
+      const base = edges.find((e) => e.data?.bondId === bondId);
+      const source = nodes.find((n) => n.id === fromId);
+      const target = nodes.find((n) => n.id === toId);
+      if (!base || !source || !target) return null;
+      get().checkpoint();
+      // Same type, speed and VLAN settings as the other members, next free ports.
+      const data = { ...inheritParallel(base, suggestConnection(source, target, edges, base.data?.connType)), bondId };
+      const edge: InfraEdge = { id: uid('e_'), type: 'network', source: fromId, target: toId, data, selected: true };
+      set({ edges: [...edges.map((e) => ({ ...e, selected: false })), edge], nodes: get().nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), dirty: true });
+      return edge.id;
     },
     updateBond: (id, patch) => {
       get().checkpoint(`bond:${id}:${Object.keys(patch).join(',')}`);

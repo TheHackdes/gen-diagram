@@ -75,7 +75,7 @@ export function EdgeProperties({ edge }: { edge: InfraEdge }) {
       {data.connType !== 'arrow' && data.connType !== 'logical' && (
         <>
           <ParallelLinksSection edge={edge} />
-          <BondSection edge={edge} />
+          <BondSection key={edge.id} edge={edge} />
         </>
       )}
 

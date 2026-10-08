@@ -1,6 +1,7 @@
 import { definitionHasField, getDefinition } from '../../data/catalog';
 import type { Bond, InfraEdge, InfraNode, NodeRole, ValidationIssue, Vlan } from '../../types';
 import { analyzeBond } from '../connections/bonds';
+import { isBondable } from '../connections/suggest';
 import { cidrEquals, cidrOverlaps, ipInCidr, isValidCidr, isValidIPv4, isValidMac, parseCidr, parseIPv4 } from '../../utils/ip';
 import { str } from '../../utils/misc';
 import { addressEntries, allIps, hasHostFirewall, hasVpn, hasWifi } from '../nodes/ips';
@@ -14,6 +15,9 @@ const L2_ROLES = new Set<NodeRole>(['switch', 'core-switch', 'ap', 'bridge', 'hy
 
 /** Devices whose firewall sees forwarded traffic (routing, bridging guests or containers). */
 const FORWARDING_ROLES = new Set<NodeRole>(['router', 'firewall', 'core-switch', 'vpn', 'hypervisor', 'docker-host', 'load-balancer', 'security']);
+
+/** Roles that can be members of the same stack / MLAG pair / HA cluster. */
+const ROLE_FAMILY: Partial<Record<NodeRole, string>> = { switch: 'switching', 'core-switch': 'switching' };
 
 const ZONE_TYPES = new Set(['vlan-zone', 'subnet', 'network-zone', 'dmz', 'docker-network']);
 
@@ -74,16 +78,23 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
   }
 
   // --- Duplicate IPs --------------------------------------------------
-  const ipOwners = new Map<string, InfraNode[]>();
+  // A public / virtual IP may be shared by the members of one HA cluster (VRRP, CARP, HSRP):
+  // it then belongs to the redundancy group, not to each device.
+  const ipOwners = new Map<string, { node: InfraNode; owner: string }[]>();
   for (const n of nodes) {
-    const addresses = [...['publicIp', 'vip'].map((k) => str(n.data.props[k]).trim()), ...allIps(n.data.props).map((e) => e.address.trim())];
-    for (const ip of new Set(addresses)) {
-      if (!isValidIPv4(ip)) continue;
-      ipOwners.set(ip, [...(ipOwners.get(ip) ?? []), n]);
+    const group = str(n.data.props.redundancyGroup).trim();
+    const shared = ['publicIp', 'vip'].map((k) => str(n.data.props[k]).trim());
+    const own = allIps(n.data.props).map((e) => e.address.trim());
+    const seen = new Set<string>();
+    for (const [ip, owner] of [...own.map((ip) => [ip, n.id]), ...shared.map((ip) => [ip, group ? `group:${group}` : n.id])]) {
+      if (!isValidIPv4(ip) || seen.has(ip)) continue;
+      seen.add(ip);
+      ipOwners.set(ip, [...(ipOwners.get(ip) ?? []), { node: n, owner }]);
     }
   }
-  for (const [ip, owners] of ipOwners) {
-    const unique = [...new Set(owners)];
+  for (const [ip, list] of ipOwners) {
+    if (new Set(list.map((o) => o.owner)).size < 2) continue;
+    const unique = [...new Set(list.map((o) => o.node))];
     if (unique.length > 1)
       push({
         severity: 'error',
@@ -228,7 +239,7 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
   // Parallel links that are not grouped: a loop only between two L2-forwarding devices.
   const pairs = new Map<string, InfraEdge[]>();
   for (const e of edges) {
-    if (!['ethernet', 'fiber'].includes(e.data?.connType ?? 'ethernet') || e.data?.bondId) continue;
+    if (!isBondable(e) || e.data?.bondId) continue;
     const k = [e.source, e.target].sort().join('|');
     pairs.set(k, [...(pairs.get(k) ?? []), e]);
   }
@@ -258,7 +269,8 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
   }
   for (const [g, members] of groups) {
     if (members.length === 1) push({ severity: 'info', message: `Redundancy group “${g}” has a single device (${members[0].data.name})`, nodeIds: [members[0].id] });
-    const roles = new Set(members.map((m) => getDefinition(m.data.type).role));
+    // Access and core switches can be stacked / paired together: compare kinds of equipment, not exact roles.
+    const roles = new Set(members.map((m) => ROLE_FAMILY[getDefinition(m.data.type).role] ?? getDefinition(m.data.type).role));
     if (roles.size > 1) push({ severity: 'warning', message: `Redundancy group “${g}” mixes different kinds of equipment (${members.map((m) => m.data.name).join(', ')})`, nodeIds: members.map((m) => m.id) });
   }
 
@@ -340,9 +352,19 @@ export function validateDiagram(nodes: InfraNode[], edges: InfraEdge[], vlans: V
     // Forwarded traffic only exists on devices that route or bridge it.
     if (rules.some((r) => r.direction === 'forward') && !FORWARDING_ROLES.has(getDefinition(n.data.type).role))
       push({ severity: 'info', message: `${n.data.name}: “Forward” rules only apply to devices that route or bridge traffic`, nodeIds: [n.id] });
-    const catchAll = rules.findIndex((r) => r.source.trim() === 'any' && r.destination.trim() === 'any' && r.protocol === 'any' && r.direction !== 'out');
-    if (catchAll >= 0 && catchAll < rules.length - 1)
-      push({ severity: 'warning', message: `${n.data.name}: rule #${catchAll + 1} matches everything — the rules after it are never used`, nodeIds: [n.id] });
+    // A rule matching everything shadows the later rules of the same direction (in, out and forward are separate chains).
+    const all = rulesOf(n.data.props);
+    for (const dir of ['in', 'out', 'forward'] as const) {
+      const catchAll = all.findIndex((r) => r.enabled && r.direction === dir && r.source.trim() === 'any' && r.destination.trim() === 'any' && r.protocol === 'any');
+      if (catchAll < 0) continue;
+      const shadowed = all.slice(catchAll + 1).filter((r) => r.enabled && r.direction === dir).length;
+      if (shadowed)
+        push({
+          severity: 'warning',
+          message: `${n.data.name}: rule #${catchAll + 1} matches all ${dir === 'forward' ? 'forwarded' : dir === 'in' ? 'incoming' : 'outgoing'} traffic — the ${shadowed} ${dir} rule${shadowed > 1 ? 's' : ''} after it ${shadowed > 1 ? 'are' : 'is'} never used`,
+          nodeIds: [n.id],
+        });
+    }
   }
 
   // --- Annotations referring to deleted equipment ---------------------

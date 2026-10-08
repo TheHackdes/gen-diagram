@@ -97,7 +97,12 @@ describe('bond sides and rules', () => {
 
   it('LACP only bonds physical links', () => {
     const m = [edge('e1', 'srv', 'swA', { connType: 'wifi' }), edge('e2', 'srv', 'swA')];
-    expect(errors(analyzeBond(bond('b', 'lacp', m), m, [srv, swA]))[0].message).toMatch(/physical/);
+    expect(errors(analyzeBond(bond('b', 'lacp', m), m, [srv, swA]))[0].message).toMatch(/only bonds cables/);
+  });
+
+  it('trunk links (VLAN type) can be aggregated like Ethernet', () => {
+    const m = [edge('e1', 'srv', 'swA', { connType: 'vlan' }), edge('e2', 'srv', 'swA', { connType: 'vlan' })];
+    expect(errors(analyzeBond(bond('b', 'lacp', m), m, [srv, swA]))).toEqual([]);
   });
 
   it('warns about mismatched speeds and VLANs; informs about single members', () => {

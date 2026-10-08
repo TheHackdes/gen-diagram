@@ -230,7 +230,8 @@ export type AlignMode = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom
 
 export function alignNodes(nodes: InfraNode[], ids: Set<string>, mode: AlignMode): InfraNode[] {
   const byId = indexById(nodes);
-  const sel = nodes.filter((n) => ids.has(n.id) && !n.data.locked);
+  // A selected child moves with its selected parent: only the roots are aligned.
+  const sel = selectionRoots(nodes, ids).filter((n) => !n.data.locked);
   if (sel.length < 2) return nodes;
   const boxes = sel.map((n) => ({ n, abs: absolutePosition(n, byId), s: nodeSize(n) }));
   const left = Math.min(...boxes.map((b) => b.abs.x));
@@ -256,7 +257,7 @@ export function alignNodes(nodes: InfraNode[], ids: Set<string>, mode: AlignMode
 
 export function distributeNodes(nodes: InfraNode[], ids: Set<string>, axis: 'horizontal' | 'vertical'): InfraNode[] {
   const byId = indexById(nodes);
-  const sel = nodes.filter((n) => ids.has(n.id) && !n.data.locked);
+  const sel = selectionRoots(nodes, ids).filter((n) => !n.data.locked);
   if (sel.length < 3) return nodes;
   const key = axis === 'horizontal' ? 'x' : 'y';
   const dim = axis === 'horizontal' ? 'width' : 'height';

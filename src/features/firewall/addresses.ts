@@ -1,5 +1,5 @@
 import type { InfraNode, Vlan } from '../../types';
-import { isValidCidr, isValidIPv4 } from '../../utils/ip';
+import { cidrEquals, isValidCidr, isValidIPv4 } from '../../utils/ip';
 import { nodeIndex } from '../nodes/hierarchy';
 import { allIps } from '../nodes/ips';
 
@@ -48,7 +48,7 @@ export function resolveAddress(value: string, nodes: InfraNode[], vlans: Vlan[])
 export function referenceFor(value: string, nodes: InfraNode[], vlans: Vlan[]): { ref: string; label: string } | null {
   const v = value.trim();
   if (isValidCidr(v)) {
-    const vlan = vlans.find((x) => x.subnet === v);
+    const vlan = vlans.find((x) => !!x.subnet && cidrEquals(x.subnet, v));
     if (vlan) return { ref: vlanRef(vlan), label: `VLAN ${vlan.id} · ${vlan.name}` };
   }
   if (isValidIPv4(v)) {

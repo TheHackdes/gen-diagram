@@ -1,4 +1,5 @@
 import { getDefinition } from '../../data/catalog';
+import { modeInfo } from '../connections/bonds';
 import type { Bond, InfraEdge, InfraNode, NodeRole, ValidationIssue, Vlan } from '../../types';
 import { str } from '../../utils/misc';
 import { addressEntries } from '../nodes/ips';
@@ -41,6 +42,7 @@ export function switchingLoops(nodes: InfraNode[], edges: InfraEdge[], bonds: Bo
   }
   // One graph edge per pair of vertices per bond / link (parallel unbonded links are reported elsewhere).
   const bondIds = new Set(bonds.map((b) => b.id));
+  const singleHost = new Set(bonds.filter((b) => modeInfo(b.mode).kind === 'aggregate' && !modeInfo(b.mode).partnerAssisted).map((b) => b.id));
   const links = new Map<string, { a: string; b: string; edgeIds: string[] }>();
   for (const e of edges) {
     if (!isL2Link(e)) continue;
@@ -50,7 +52,9 @@ export function switchingLoops(nodes: InfraNode[], edges: InfraEdge[], bonds: Bo
     const pair = a < b ? `${a}|${b}` : `${b}|${a}`;
     const bond = e.data?.bondId && bondIds.has(e.data.bondId) ? e.data.bondId : '';
     // Bonded links and parallel links between the same two switches form a single path here.
-    const key = bond ? `${pair}|${bond}` : pair;
+    // A switch-independent bond (active-backup, ALB, TLB) lives on one device and never forwards
+    // between its members: towards different switches it is still one uplink, not a loop.
+    const key = bond ? (singleHost.has(bond) ? `bond|${bond}` : `${pair}|${bond}`) : pair;
     const existing = links.get(key);
     if (existing) existing.edgeIds.push(e.id);
     else links.set(key, { a: a < b ? a : b, b: a < b ? b : a, edgeIds: [e.id] });

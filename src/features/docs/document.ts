@@ -5,7 +5,7 @@ import { SERVICE_BY_ID, servicesOf } from '../../data/services';
 import type { Bond, InfraEdge, InfraNode, ValidationIssue, Vlan } from '../../types';
 import { ipInCidr, parseCidr, parseIPv4 } from '../../utils/ip';
 import { cmpId, str } from '../../utils/misc';
-import { bondCapacity, bondMembers, modeInfo } from '../connections/bonds';
+import { analyzeBond, bondCapacity, bondMembers, modeInfo } from '../connections/bonds';
 import { resolveAddress } from '../firewall/addresses';
 import { formatPorts, hasRules, rulesOf } from '../firewall/rules';
 import { allIps } from '../nodes/ips';
@@ -209,7 +209,11 @@ export function buildDocument(input: DocInput, sections: DocSectionId[], now = n
               columns: ['Name', 'Peer name', 'Mode', 'Between', 'Members', 'Capacity'],
               rows: bonds.map((b) => {
                 const members = bondMembers(b.id, edges);
-                const ends = [...new Set(members.flatMap((m) => [name(m.source), name(m.target)]))].join(' ↔ ');
+                // The two sides of the aggregate: "srv ↔ sw-01 + sw-02".
+                const ends = analyzeBond(b, edges, nodes)
+                  .sides.map((side) => side.map(name).sort((x, y) => x.localeCompare(y)).join(' + '))
+                  .filter(Boolean)
+                  .join(' ↔ ');
                 const info = modeInfo(b.mode);
                 return [b.name, b.peerName ?? '', info.label, ends, String(members.length), bondCapacity(info, members)];
               }),

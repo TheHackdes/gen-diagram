@@ -13,6 +13,7 @@ import {
   Lock,
   Trash,
 } from 'lucide-react';
+import { modeInfo, suggestBondMode } from '../../features/connections/bonds';
 import { useDiagram } from '../../store/diagramStore';
 import type { InfraNode } from '../../types';
 import { modKey } from '../../utils/misc';
@@ -22,6 +23,11 @@ import { Section } from './NodeProperties';
 export function MultiProperties({ nodes, edgeIds }: { nodes: InfraNode[]; edgeIds: string[] }) {
   const st = useDiagram.getState();
   const edgeCount = edgeIds.length;
+  // The mode the bond will start with, valid for these links.
+  const bondMode = useDiagram((s) => {
+    const members = s.edges.filter((e) => edgeIds.includes(e.id) && e.data?.connType !== 'arrow');
+    return members.length ? modeInfo(suggestBondMode(members, s.nodes)).label : '';
+  });
   const ids = nodes.map((n) => n.id);
   return (
     <div>
@@ -50,9 +56,14 @@ export function MultiProperties({ nodes, edgeIds }: { nodes: InfraNode[]; edgeId
       {edgeIds.length >= 2 && (
         <Section title="Links">
           <p className="mb-2 text-[11.5px] leading-snug text-subtle">Selected links can form one bond, even towards different devices (MLAG, stack, vPC).</p>
-          <Button size="sm" variant="primary" icon={<Link2 size={14} />} onClick={() => st.createBond(edgeIds)}>
-            Bond {edgeIds.length} links
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="primary" icon={<Link2 size={14} />} onClick={() => st.createBond(edgeIds)}>
+              Bond {edgeIds.length} links
+            </Button>
+            <span className="text-[11px] text-subtle">
+              Mode: <span className="font-medium text-muted">{bondMode}</span>
+            </span>
+          </div>
         </Section>
       )}
       <Section title="Actions">

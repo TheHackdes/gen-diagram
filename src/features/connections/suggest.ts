@@ -20,6 +20,12 @@ export const CONNECTION_TYPES: { id: ConnectionType; label: string; color: strin
   { id: 'arrow', label: 'Arrow (annotation)', color: '#64748b', width: 1.5 },
 ];
 
+/** Cables that can be aggregated into a bond (LACP, active-backup…): Ethernet, fiber and trunks. */
+export const BONDABLE_TYPES = new Set<ConnectionType>(['ethernet', 'fiber', 'vlan']);
+
+/** Can this link be a member of a link aggregation? (A missing type is Ethernet.) */
+export const isBondable = (e: Pick<InfraEdge, 'data'>) => BONDABLE_TYPES.has(e.data?.connType ?? 'ethernet');
+
 export const CONNECTION_STYLE = Object.fromEntries(CONNECTION_TYPES.map((c) => [c.id, c])) as Record<
   ConnectionType,
   (typeof CONNECTION_TYPES)[number]

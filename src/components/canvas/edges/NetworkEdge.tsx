@@ -13,7 +13,7 @@ import { CONNECTION_STYLE } from '../../../features/connections/suggest';
 import { useReducedMotion } from '../../../hooks/useReducedMotion';
 import { useDiagram } from '../../../store/diagramStore';
 import { useUi } from '../../../store/uiStore';
-import type { InfraEdge } from '../../../types';
+import type { InfraEdge, InfraNode } from '../../../types';
 import { cn } from '../../ui/cn';
 import { hideLinkText } from '../../../features/canvas/lod';
 import { geometry, isVertical, labelPositions, type Side } from './geometry';
@@ -55,6 +55,30 @@ function decodeVisual(v: string): { g: Geometry; l: [number, number] | null; d: 
   };
 }
 
+const selectedBondsCache = new WeakMap<InfraEdge[], Set<string>>();
+
+/** Bonds with a selected member (computed once per change of the links, not per link). */
+function selectedBonds(edges: InfraEdge[]): Set<string> {
+  let hit = selectedBondsCache.get(edges);
+  if (!hit) {
+    hit = new Set(edges.filter((e) => e.selected && e.data?.bondId).map((e) => e.data!.bondId!));
+    selectedBondsCache.set(edges, hit);
+  }
+  return hit;
+}
+
+const selectedNodesCache = new WeakMap<InfraNode[], Set<string>>();
+
+/** Ids of the selected devices (computed once per change of the nodes). */
+function selectedNodes(nodes: InfraNode[]): Set<string> {
+  let hit = selectedNodesCache.get(nodes);
+  if (!hit) {
+    hit = new Set(nodes.filter((n) => n.selected).map((n) => n.id));
+    selectedNodesCache.set(nodes, hit);
+  }
+  return hit;
+}
+
 /** Port tags would overlap when many links share a side; they stay in the properties panel. */
 const CROWDED = 3;
 
@@ -81,7 +105,16 @@ function NetworkEdgeImpl({ id, source, target, data, selected }: EdgeProps<Infra
   const animate = useUi((st) => st.presentation && st.presentationAnim) && !reducedMotion;
   // Presentation focus (computed by the canvas): 'on' for links of the focused device, 'off' for the others.
   const focus = (data as { _focus?: 'on' | 'off' | 'muted' } | undefined)?._focus;
+  // Selecting one member of a bond shows the others (they may join different devices).
+  const bondLit = useDiagram((st) => !!data?.bondId && !selected && selectedBonds(st.edges).has(data.bondId));
+  // The links of a selected device stand out from the rest (one device, many relations).
+  const ofSelected = useDiagram((st) => {
+    const sel = selectedNodes(st.nodes);
+    return sel.size > 0 && sel.size <= 20 && (sel.has(source) || sel.has(target));
+  });
   const firstVlan = useDiagram((st) => (vlanIds.length ? st.vlans.find((v) => String(v.id) === vlanIds[0]) : undefined));
+  // Selection highlights are an editing aid: never in exported images.
+  const exporting = useUi((st) => st.exporting);
   if (!visual) return null;
   const parsed = decodeVisual(visual);
   const { a, b, shift, aSlots, bSlots, marks } = parsed.g;
@@ -109,7 +142,7 @@ function NetworkEdgeImpl({ id, source, target, data, selected }: EdgeProps<Infra
   // 'muted': stepped back by the security view (still readable).
   const dim = focus === 'off' || focus === 'muted';
   const dimOpacity = focus === 'muted' ? 0.3 : 0.12;
-  const lit = focus === 'on';
+  const lit = focus === 'on' || (!exporting && (bondLit || ofSelected));
   const length = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
   const trunk = data?.mode === 'trunk';
   // A label on a very short link (stack / peer link) would cover the devices.
